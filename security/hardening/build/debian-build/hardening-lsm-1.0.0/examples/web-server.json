@@ -1,0 +1,39 @@
+{
+  "name": "web-server",
+  "description": "Security profile for web servers",
+  "version": "1.0",
+  "capabilities": [
+    "CAP_NET_BIND_SERVICE",
+    "CAP_SETUID",
+    "CAP_SETGID"
+  ],
+  "network_policy": {
+    "incoming_connections": true,
+    "outgoing_connections": false,
+    "allowed_ports": [80, 443, 8080, 8443]
+  },
+  "filesystem_policy": {
+    "readonly_root": true,
+    "writable_dirs": ["/var/log", "/tmp", "/var/cache"],
+    "executable_dirs": ["/usr/bin", "/bin"]
+  },
+  "resource_limits": {
+    "memory_mb": 2048,
+    "cpu_percent": 80,
+    "file_descriptors": 4096,
+    "threads": 200
+  },
+  "temporal_rules": [
+    {
+      "name": "business_hours",
+      "hours": "8-18",
+      "days": "mon-fri",
+      "restrictions": ["no_admin_operations"]
+    }
+  ],
+  "behavioral_settings": {
+    "anomaly_threshold": 15,
+    "learning_mode": false,
+    "pattern_window": 128
+  }
+}

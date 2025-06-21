@@ -1,0 +1,37 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Add hardening to LSM list if not present
+        if ! grep -q "hardening" /etc/default/grub; then
+            echo "Adding hardening to kernel LSM list..."
+            sed -i 's/\(GRUB_CMDLINE_LINUX_DEFAULT=".*\)"$/\1 lsm=landlock,lockdown,yama,loadpin,safesetid,hardening,selinux,apparmor"/' /etc/default/grub
+            update-grub
+        fi
+        
+        # Load module if kernel supports it
+        if [ -d /sys/kernel/security/hardening ]; then
+            echo "Security Hardening LSM detected and active"
+        else
+            echo "Security Hardening LSM will be active after reboot"
+        fi
+        
+        # Create default config directory
+        mkdir -p /etc/hardening-lsm/profiles
+        
+        echo "Installation complete. Please reboot to activate the Security Hardening LSM."
+        ;;
+        
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

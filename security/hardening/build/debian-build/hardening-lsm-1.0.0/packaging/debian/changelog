@@ -1,0 +1,13 @@
+hardening-lsm (1.0.0-1) unstable; urgency=medium
+
+  * Initial release
+  * ML-inspired behavioral anomaly detection
+  * Temporal access control
+  * Process lineage tracking
+  * Container-aware security
+  * Network behavior profiling
+  * Memory access pattern analysis
+  * Entropy-based randomization
+  * Adaptive security levels
+
+ -- Alessio <alessio@linux.com>  Fri, 21 Jun 2024 00:00:00 +0000
