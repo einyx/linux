@@ -10,6 +10,10 @@
 #include <linux/hash.h>
 #include <crypto/hash.h>
 
+/* Forward declarations */
+struct socket;
+struct sockaddr;
+
 /* Module configuration */
 extern int hardening_enabled;
 extern int hardening_enforce;
@@ -79,7 +83,7 @@ struct hardening_resource_stats {
 
 struct hardening_resource_baseline {
 	struct hardening_resource_stats baseline;
-	struct hardening_resource_stats current;
+	struct hardening_resource_stats current_stats;
 	u32 deviation_count;
 	bool learning_mode;
 };
@@ -263,6 +267,11 @@ struct hardening_task_ctx {
 /* Global statistics */
 extern struct hardening_stats hardening_global_stats;
 
+/* Statistics functions */
+int hardening_show_stats(struct seq_file *m, void *v);
+void hardening_reset_stats(void);
+void hardening_update_check_time(u64 start_ns);
+
 /* Profile management */
 extern struct rb_root hardening_profiles;
 extern rwlock_t hardening_profiles_lock;
@@ -275,8 +284,11 @@ void hardening_exit_securityfs(void);
 int hardening_check_time_access(struct hardening_task_ctx *ctx);
 int hardening_add_time_rule(struct hardening_task_ctx *ctx,
 			    struct hardening_time_rule *rule);
+void hardening_cleanup_time_rules(struct hardening_task_ctx *ctx);
 
 /* Behavioral anomaly detection */
+struct hardening_behavior_profile *hardening_alloc_behavior_profile(void);
+void hardening_free_behavior_profile(struct hardening_behavior_profile *behavior);
 int hardening_update_behavior(struct hardening_task_ctx *ctx, int syscall_nr);
 int hardening_check_anomaly(struct hardening_task_ctx *ctx);
 int hardening_calculate_entropy(struct hardening_behavior_profile *behavior);
@@ -284,6 +296,8 @@ int hardening_update_markov_chain(struct hardening_behavior_profile *behavior,
 				  u32 from, u32 to);
 
 /* Resource fingerprinting */
+struct hardening_resource_baseline *hardening_alloc_resource_baseline(void);
+void hardening_free_resource_baseline(struct hardening_resource_baseline *baseline);
 int hardening_update_resources(struct hardening_task_ctx *ctx);
 int hardening_check_resource_deviation(struct hardening_task_ctx *ctx);
 
@@ -291,17 +305,24 @@ int hardening_check_resource_deviation(struct hardening_task_ctx *ctx);
 int hardening_init_lineage(struct hardening_task_ctx *ctx);
 int hardening_check_lineage(struct hardening_task_ctx *ctx);
 bool hardening_is_suspicious_lineage(struct hardening_lineage *lineage);
+void hardening_free_lineage(struct hardening_lineage *lineage);
 
 /* Container support */
 int hardening_init_container_ctx(struct hardening_task_ctx *ctx);
 int hardening_get_container_id(u64 *container_id);
 int hardening_apply_container_policy(struct hardening_task_ctx *ctx);
+void hardening_free_container_ctx(struct hardening_container_ctx *container);
+int hardening_check_container_operation(struct hardening_task_ctx *ctx, int op_type);
+bool hardening_detect_container_escape(struct hardening_task_ctx *ctx);
 
 /* Network profiling */
 int hardening_init_network_profile(struct hardening_task_ctx *ctx);
 int hardening_update_network_activity(struct hardening_task_ctx *ctx,
 				     int sock_type, int result);
 int hardening_check_network_anomaly(struct hardening_task_ctx *ctx);
+void hardening_free_network_profile(struct hardening_network_profile *network);
+int hardening_socket_create(int family, int type, int protocol);
+int hardening_socket_connect(struct socket *sock, struct sockaddr *address, int addrlen);
 
 /* Memory analysis */
 int hardening_init_memory_profile(struct hardening_task_ctx *ctx);
@@ -309,22 +330,32 @@ int hardening_track_memory_operation(struct hardening_task_ctx *ctx,
 				    int operation, unsigned long addr,
 				    size_t len, int prot);
 int hardening_detect_exploit_attempt(struct hardening_task_ctx *ctx);
+void hardening_free_memory_profile(struct hardening_memory_profile *memory);
 
 /* Cryptographic integrity */
 int hardening_init_crypto(struct hardening_task_ctx *ctx);
 int hardening_compute_process_hash(struct hardening_task_ctx *ctx);
 int hardening_verify_integrity(struct hardening_task_ctx *ctx);
+void hardening_free_crypto(struct hardening_crypto_ctx *crypto);
 
 /* Profile management */
 int hardening_load_profile(const char *name, 
 			  struct hardening_security_profile *profile);
 struct hardening_security_profile *hardening_find_profile(const char *name);
 int hardening_apply_profile(struct hardening_task_ctx *ctx, const char *profile_name);
+int hardening_check_profile_policy(struct hardening_task_ctx *ctx,
+				   int policy_type, u32 value);
+int hardening_init_profiles(void);
+void hardening_cleanup_profiles(void);
 
 /* Entropy and randomization */
 void hardening_add_entropy(struct hardening_task_ctx *ctx, u32 value);
 u32 hardening_get_random(struct hardening_task_ctx *ctx);
 int hardening_randomize_decision(struct hardening_task_ctx *ctx, int probability);
+void hardening_init_entropy(struct hardening_task_ctx *ctx);
+void hardening_random_delay(struct hardening_task_ctx *ctx, u32 max_delay_us);
+void hardening_entropy_security_adjust(struct hardening_task_ctx *ctx, u32 factor);
+u32 hardening_randomize_threshold(struct hardening_task_ctx *ctx, u32 base, u32 range);
 
 /* Adaptive security */
 void hardening_escalate_security(struct hardening_task_ctx *ctx);
@@ -332,6 +363,7 @@ void hardening_deescalate_security(struct hardening_task_ctx *ctx);
 int hardening_check_capability(struct hardening_task_ctx *ctx, int cap);
 int hardening_check_resource_limit(struct hardening_task_ctx *ctx,
 				   int resource_type, u32 value);
+const struct security_level_policy *hardening_get_level_policy(enum hardening_security_level level);
 
 /* Memory operation types */
 #define MEM_OP_MMAP		1

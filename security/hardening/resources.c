@@ -49,14 +49,14 @@ static void get_task_resources(struct task_struct *task,
 	}
 }
 
-static int calculate_deviation(u64 baseline, u64 current)
+static int calculate_deviation(u64 baseline, u64 current_val)
 {
 	u64 diff;
 	
 	if (baseline == 0)
-		return current > 0 ? 100 : 0;
+		return current_val > 0 ? 100 : 0;
 		
-	diff = current > baseline ? current - baseline : baseline - current;
+	diff = current_val > baseline ? current_val - baseline : baseline - current_val;
 	return (diff * 100) / baseline;
 }
 
@@ -73,7 +73,7 @@ int hardening_update_resources(struct hardening_task_ctx *ctx)
 	now = ktime_get_ns();
 	
 	/* Check if enough time has passed */
-	if (now - res->current.last_checkpoint < RESOURCE_CHECK_INTERVAL_NS)
+	if (now - res->current_stats.last_checkpoint < RESOURCE_CHECK_INTERVAL_NS)
 		return 0;
 		
 	/* Get current resource usage */
@@ -103,7 +103,7 @@ int hardening_update_resources(struct hardening_task_ctx *ctx)
 	}
 	
 	/* Store current stats */
-	res->current = current_stats;
+	res->current_stats = current_stats;
 	
 	return 0;
 }
@@ -121,15 +121,15 @@ int hardening_check_resource_deviation(struct hardening_task_ctx *ctx)
 	
 	/* Calculate deviations */
 	cpu_dev = calculate_deviation(res->baseline.cpu_time_ns,
-				      res->current.cpu_time_ns);
+				      res->current_stats.cpu_time_ns);
 	mem_dev = calculate_deviation(res->baseline.memory_peak_kb,
-				      res->current.memory_peak_kb);
+				      res->current_stats.memory_peak_kb);
 	io_dev = calculate_deviation(res->baseline.io_bytes_read + 
 				     res->baseline.io_bytes_written,
-				     res->current.io_bytes_read + 
-				     res->current.io_bytes_written);
+				     res->current_stats.io_bytes_read + 
+				     res->current_stats.io_bytes_written);
 	fd_dev = calculate_deviation(res->baseline.file_descriptors,
-				     res->current.file_descriptors);
+				     res->current_stats.file_descriptors);
 	
 	/* Find maximum deviation */
 	max_deviation = max(max(cpu_dev, mem_dev), max(io_dev, fd_dev));
@@ -165,7 +165,7 @@ struct hardening_resource_baseline *hardening_alloc_resource_baseline(void)
 		return NULL;
 		
 	res->learning_mode = true;
-	res->current.last_checkpoint = ktime_get_ns();
+	res->current_stats.last_checkpoint = ktime_get_ns();
 	
 	return res;
 }

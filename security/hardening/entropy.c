@@ -30,7 +30,7 @@ static u32 mix_entropy(u32 pool, u32 input)
 	/* Run LFSR for several rounds */
 	for (i = 0; i < 8; i++) {
 		/* Polynomial: x^32 + x^22 + x^2 + x^1 + 1 */
-		bit = ((lfsr >> 0) ^ (lfsr >> 2) ^ (lfsr >> 22) ^ (lfsr >> 32)) & 1;
+		bit = ((lfsr >> 0) ^ (lfsr >> 2) ^ (lfsr >> 22) ^ (lfsr >> 31)) & 1;
 		lfsr = (lfsr >> 1) | (bit << 31);
 	}
 	
@@ -132,16 +132,16 @@ int hardening_randomize_decision(struct hardening_task_ctx *ctx, int probability
 }
 
 /* Randomize delay for anti-timing attacks */
-void hardening_random_delay(struct hardening_task_ctx *ctx)
+void hardening_random_delay(struct hardening_task_ctx *ctx, u32 max_delay_us)
 {
 	u32 delay_ns;
 	ktime_t start, end;
 	
-	if (!ctx)
+	if (!ctx || max_delay_us == 0)
 		return;
 		
-	/* Get random delay 0-1000 nanoseconds */
-	delay_ns = hardening_get_random(ctx) % 1000;
+	/* Get random delay up to max_delay_us microseconds */
+	delay_ns = (hardening_get_random(ctx) % max_delay_us) * NSEC_PER_USEC;
 	
 	/* Busy wait for random delay */
 	start = ktime_get();
@@ -168,49 +168,42 @@ void hardening_init_entropy(struct hardening_task_ctx *ctx)
 }
 
 /* Entropy-based security level adjustment */
-int hardening_entropy_security_adjust(struct hardening_task_ctx *ctx)
+void hardening_entropy_security_adjust(struct hardening_task_ctx *ctx, u32 factor)
 {
 	u32 random_factor;
-	int adjustment = 0;
 	
-	if (!ctx)
-		return 0;
+	if (!ctx || factor == 0)
+		return;
 		
 	/* Get random factor */
 	random_factor = hardening_get_random(ctx) % 100;
 	
 	/* Randomly adjust security checks */
-	if (random_factor < 10) {
-		/* 10% chance to increase scrutiny */
-		adjustment = 1;
+	if (random_factor < factor) {
+		/* Adjust security level based on factor */
+		if (ctx->sec_level < HARDENING_LEVEL_MAX) {
+			ctx->sec_level++;
+		}
 	} else if (random_factor > 95) {
 		/* 5% chance to add random delay */
-		hardening_random_delay(ctx);
+		hardening_random_delay(ctx, 100);
 	}
-	
-	return adjustment;
 }
 
 /* Randomize anomaly thresholds to prevent gaming */
 u32 hardening_randomize_threshold(struct hardening_task_ctx *ctx,
-				  u32 base_threshold)
+				  u32 base, u32 range)
 {
 	u32 variance;
 	u32 random_val;
 	
-	if (!ctx)
-		return base_threshold;
+	if (!ctx || range == 0)
+		return base;
 		
-	/* Add +/- 20% variance */
-	variance = base_threshold / 5;
+	/* Get random value within range */
 	random_val = hardening_get_random(ctx);
+	variance = random_val % range;
 	
-	/* Calculate adjusted threshold */
-	if (random_val & 1) {
-		/* Add variance */
-		return base_threshold + (random_val % variance);
-	} else {
-		/* Subtract variance */
-		return base_threshold - (random_val % variance);
-	}
+	/* Return base plus random variance */
+	return base + variance;
 }

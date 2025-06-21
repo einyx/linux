@@ -102,7 +102,6 @@ static bool is_anomalous_transition(struct hardening_behavior_profile *behavior,
 {
 	struct syscall_transition *trans;
 	u32 hash = calculate_transition_hash(from, to);
-	struct list_head *bucket = &behavior->markov_transitions[hash];
 	u32 total_from = 0;
 	u32 transition_count = 0;
 	
@@ -157,6 +156,7 @@ int hardening_update_behavior(struct hardening_task_ctx *ctx, int syscall_nr)
 	struct hardening_behavior_profile *behavior;
 	unsigned long flags;
 	u32 old_syscall;
+	u32 prev_syscall;
 	
 	if (!ctx || !ctx->behavior)
 		return 0;
@@ -165,16 +165,34 @@ int hardening_update_behavior(struct hardening_task_ctx *ctx, int syscall_nr)
 	
 	spin_lock_irqsave(&behavior->lock, flags);
 	
+	/* Get previous syscall for Markov chain update */
+	if (behavior->pattern_index > 0) {
+		prev_syscall = behavior->syscall_pattern[behavior->pattern_index - 1];
+	} else if (behavior->total_transitions > 0) {
+		prev_syscall = behavior->syscall_pattern[HARDENING_BEHAVIOR_WINDOW - 1];
+	} else {
+		prev_syscall = 0;
+	}
+	
 	/* Store syscall in circular buffer */
 	old_syscall = behavior->syscall_pattern[behavior->pattern_index];
 	behavior->syscall_pattern[behavior->pattern_index] = syscall_nr;
 	behavior->pattern_index = (behavior->pattern_index + 1) % 
 				  HARDENING_BEHAVIOR_WINDOW;
 	
+	/* Update syscall frequency */
+	if (syscall_nr < 512)
+		behavior->syscall_frequency[syscall_nr]++;
+	
 	/* Update timestamp */
 	behavior->last_update = ktime_get_ns();
 	
 	spin_unlock_irqrestore(&behavior->lock, flags);
+	
+	/* Update Markov chain if we have a previous syscall */
+	if (behavior->total_transitions > 0 && prev_syscall != 0) {
+		hardening_update_markov_chain(behavior, prev_syscall, syscall_nr);
+	}
 	
 	/* Check for anomalies if we have enough data */
 	if (behavior->pattern_index == 0) {
@@ -189,6 +207,7 @@ int hardening_check_anomaly(struct hardening_task_ctx *ctx)
 	struct hardening_behavior_profile *behavior;
 	u32 ngram[NGRAM_SIZE];
 	u32 anomaly_count = 0;
+	u32 complexity_score;
 	int i, j;
 	unsigned long flags;
 	
@@ -198,6 +217,10 @@ int hardening_check_anomaly(struct hardening_task_ctx *ctx)
 	behavior = ctx->behavior;
 	
 	spin_lock_irqsave(&behavior->lock, flags);
+	
+	/* Calculate sequence complexity */
+	complexity_score = calculate_sequence_complexity(behavior->syscall_pattern, 
+						       HARDENING_BEHAVIOR_WINDOW);
 	
 	/* Analyze n-grams in the pattern */
 	for (i = 0; i <= HARDENING_BEHAVIOR_WINDOW - NGRAM_SIZE; i++) {
@@ -231,9 +254,26 @@ int hardening_check_anomaly(struct hardening_task_ctx *ctx)
 		}
 	}
 	
-	/* Calculate anomaly score */
+	/* Check for anomalous transitions */
+	if (behavior->pattern_index > 0) {
+		u32 prev_syscall = behavior->syscall_pattern[
+			(behavior->pattern_index - 1 + HARDENING_BEHAVIOR_WINDOW) % 
+			HARDENING_BEHAVIOR_WINDOW];
+		u32 curr_syscall = behavior->syscall_pattern[behavior->pattern_index];
+		
+		if (is_anomalous_transition(behavior, prev_syscall, curr_syscall)) {
+			anomaly_count += 5; /* Weight transition anomalies higher */
+		}
+	}
+	
+	/* Calculate anomaly score incorporating complexity */
 	behavior->anomaly_score = (anomaly_count * 100) / 
 				  (HARDENING_BEHAVIOR_WINDOW - NGRAM_SIZE + 1);
+	
+	/* Adjust score based on complexity - low complexity is more suspicious */
+	if (complexity_score < 30) {
+		behavior->anomaly_score += (30 - complexity_score) / 2;
+	}
 	
 	spin_unlock_irqrestore(&behavior->lock, flags);
 	
@@ -241,8 +281,8 @@ int hardening_check_anomaly(struct hardening_task_ctx *ctx)
 	if (behavior->anomaly_score > HARDENING_ANOMALY_THRESHOLD) {
 		if (hardening_enforce) {
 			pr_notice("hardening: behavioral anomaly detected "
-				  "(score: %u) for %s[%d]\n",
-				  behavior->anomaly_score, 
+				  "(score: %u, complexity: %u) for %s[%d]\n",
+				  behavior->anomaly_score, complexity_score,
 				  current->comm, current->pid);
 		}
 		
@@ -258,6 +298,7 @@ int hardening_check_anomaly(struct hardening_task_ctx *ctx)
 struct hardening_behavior_profile *hardening_alloc_behavior_profile(void)
 {
 	struct hardening_behavior_profile *behavior;
+	int i;
 	
 	behavior = kzalloc(sizeof(*behavior), GFP_KERNEL);
 	if (!behavior)
@@ -266,10 +307,29 @@ struct hardening_behavior_profile *hardening_alloc_behavior_profile(void)
 	spin_lock_init(&behavior->lock);
 	behavior->last_update = ktime_get_ns();
 	
+	/* Initialize Markov transition hash buckets */
+	for (i = 0; i < PATTERN_HASH_SIZE; i++) {
+		INIT_LIST_HEAD(&behavior->markov_transitions[i]);
+	}
+	
 	return behavior;
 }
 
 void hardening_free_behavior_profile(struct hardening_behavior_profile *behavior)
 {
+	struct syscall_transition *trans, *tmp;
+	int i;
+	
+	if (!behavior)
+		return;
+	
+	/* Free all Markov chain transitions */
+	for (i = 0; i < PATTERN_HASH_SIZE; i++) {
+		list_for_each_entry_safe(trans, tmp, &behavior->markov_transitions[i], list) {
+			list_del(&trans->list);
+			kfree(trans);
+		}
+	}
+	
 	kfree(behavior);
 }

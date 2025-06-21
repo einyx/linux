@@ -15,14 +15,13 @@
 #include <linux/spinlock.h>
 #include <linux/sched.h>
 #include <linux/cred.h>
+#include <linux/binfmts.h>
 #include "hardening.h"
 
 int hardening_enabled = 1;
 int hardening_enforce = 0;
 
 /* Forward declarations */
-extern struct hardening_behavior_profile *hardening_alloc_behavior_profile(void);
-extern void hardening_free_behavior_profile(struct hardening_behavior_profile *behavior);
 extern struct hardening_resource_baseline *hardening_alloc_resource_baseline(void);
 extern void hardening_free_resource_baseline(struct hardening_resource_baseline *res);
 extern void hardening_cleanup_time_rules(struct hardening_task_ctx *ctx);
@@ -359,9 +358,7 @@ static int hardening_file_mprotect(struct vm_area_struct *vma,
 
 /* Network hooks */
 #ifdef CONFIG_SECURITY_HARDENING_NETWORK
-extern int hardening_socket_create(int family, int type, int protocol);
-extern int hardening_socket_connect(struct socket *sock,
-				    struct sockaddr *address, int addrlen);
+/* Socket functions are declared in hardening.h */
 
 static int hardening_socket_create_hook(int family, int type,
 					int protocol, int kern)

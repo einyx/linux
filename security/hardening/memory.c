@@ -10,7 +10,12 @@
 #include <linux/mm.h>
 #include <linux/mman.h>
 #include <linux/random.h>
+#include <linux/sched/task_stack.h>
 #include "hardening.h"
+
+/* Forward declarations */
+static bool detect_rop_chain(unsigned long addr, size_t len);
+static bool detect_stack_pivot(struct hardening_memory_profile *memory, unsigned long addr);
 
 /* Memory operation types */
 #define MEM_OP_MMAP		1
@@ -92,6 +97,11 @@ int hardening_track_memory_operation(struct hardening_task_ctx *ctx,
 			if ((prot & PROT_READ) && (prot & PROT_WRITE)) {
 				memory->rwx_mappings++;
 				pr_notice("hardening: RWX mapping detected at %lx\n", addr);
+				
+				/* Check for potential ROP chain */
+				if (detect_rop_chain(addr, len)) {
+					memory->rop_chain_suspected = true;
+				}
 			}
 		}
 		
@@ -106,6 +116,11 @@ int hardening_track_memory_operation(struct hardening_task_ctx *ctx,
 		if ((prot & PROT_EXEC) && (prot & PROT_WRITE)) {
 			pr_notice("hardening: mprotect W^X violation at %lx\n", addr);
 			memory->rwx_mappings++;
+		}
+		
+		/* Check for stack pivot attempts */
+		if (detect_stack_pivot(memory, addr)) {
+			pr_alert("hardening: potential stack pivot at %lx\n", addr);
 		}
 		break;
 		
@@ -189,8 +204,8 @@ static bool detect_stack_pivot(struct hardening_memory_profile *memory,
 		return false;
 		
 	/* Get current stack boundaries */
-	stack_start = current->stack_start;
-	stack_end = stack_start - THREAD_SIZE;
+	stack_end = (unsigned long)task_stack_page(current);
+	stack_start = stack_end + THREAD_SIZE;
 	
 	/* Check if address is suspiciously far from stack */
 	if (addr < stack_end - STACK_PIVOT_DISTANCE ||

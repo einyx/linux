@@ -151,7 +151,7 @@ int hardening_check_lineage(struct hardening_task_ctx *ctx)
 	/* Check for rapid process creation (fork bomb) */
 	rcu_read_lock();
 	parent = current->real_parent;
-	if (parent && time_before(jiffies, parent->start_time + HZ)) {
+	if (parent && time_before((unsigned long)jiffies, (unsigned long)(parent->start_time + HZ))) {
 		/* Parent created less than 1 second ago */
 		depth_score += 20;
 	}
