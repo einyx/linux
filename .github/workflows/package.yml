@@ -82,6 +82,14 @@ jobs:
         git config --global user.email "actions@github.com"
         git config --global user.name "GitHub Actions"
     
+    - name: Initialize git repository
+      run: |
+        if [ ! -d .git ]; then
+          git init
+          git add -A
+          git commit -m "Initial commit for RPM build"
+        fi
+    
     - name: Configure kernel
       run: |
         if [ "${{ matrix.arch }}" = "aarch64" ]; then
