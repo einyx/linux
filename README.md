@@ -19,7 +19,7 @@ the problems which may result by upgrading your kernel.
 ➜  staging git:(main) cat README.md
 # Linux Kernel with Advanced Security Hardening Module
 
-This is a fork of the Linux kernel that includes an advanced security hardening module providing runtime protection against modern attack vectors through behavioral analysis and adaptive security controls.
+This is a fork of the Linux kernel that includes a security hardening module providing runtime protection against modern attack vectors through behavioral analysis and adaptive security controls.
 
 ## 🛡️ Security Features
 
