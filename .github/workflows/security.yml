@@ -8,11 +8,22 @@ on:
   schedule:
     - cron: '0 0 * * *'  # Daily security scan
 
+env:
+  # Avoid permission issues with self-hosted runners
+  RUNNER_TEMP: /tmp/runner-temp
+  RUNNER_TOOL_CACHE: /tmp/runner-tool-cache
+
 jobs:
   static-analysis:
     runs-on: self-hosted
     
     steps:
+    - name: Setup runner directories
+      run: |
+        sudo mkdir -p /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
+        sudo chmod 777 /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
+        sudo chown -R $USER:$USER /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work || true
+    
     - name: Checkout code
       uses: actions/checkout@v4
       with:
@@ -68,12 +79,18 @@ jobs:
         retention-days: 30
 
   kernel-hardening-check:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       actions: read
     
     steps:
+    - name: Setup runner directories
+      run: |
+        sudo mkdir -p /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
+        sudo chmod 777 /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
+        sudo chown -R $USER:$USER /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work || true
+    
     - name: Checkout code
       uses: actions/checkout@v4
     
@@ -139,9 +156,15 @@ jobs:
         retention-days: 30
 
   vulnerability-scan:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     
     steps:
+    - name: Setup runner directories
+      run: |
+        sudo mkdir -p /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
+        sudo chmod 777 /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
+        sudo chown -R $USER:$USER /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work || true
+    
     - name: Checkout code
       uses: actions/checkout@v4
     
