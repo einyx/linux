@@ -1,0 +1,196 @@
+# Docker Container Security Policy for Hardening LSM
+#
+# This policy defines security restrictions for Docker containers
+
+# Container runtime detection
+runtimes:
+  docker:
+    cgroup_prefix: "docker"
+    socket_path: "/var/run/docker.sock"
+  containerd:
+    cgroup_prefix: "containerd"  
+    socket_path: "/run/containerd/containerd.sock"
+  podman:
+    cgroup_prefix: "machine.slice"
+    socket_path: "/run/podman/podman.sock"
+  kubernetes:
+    cgroup_prefix: "kubepods"
+
+# Default container restrictions
+container_defaults:
+  # Capability restrictions
+  denied_capabilities:
+    - CAP_SYS_ADMIN
+    - CAP_SYS_MODULE
+    - CAP_SYS_RAWIO
+    - CAP_SYS_PTRACE
+    - CAP_SYS_BOOT
+    - CAP_NET_ADMIN
+    - CAP_DAC_READ_SEARCH
+    
+  allowed_capabilities:
+    - CAP_CHOWN
+    - CAP_DAC_OVERRIDE
+    - CAP_FSETID
+    - CAP_FOWNER
+    - CAP_MKNOD
+    - CAP_NET_RAW
+    - CAP_SETGID
+    - CAP_SETUID
+    - CAP_SETFCAP
+    - CAP_SETPCAP
+    - CAP_NET_BIND_SERVICE
+    - CAP_SYS_CHROOT
+    - CAP_KILL
+    - CAP_AUDIT_WRITE
+
+  # Filesystem restrictions
+  denied_paths:
+    - "/proc/sys"
+    - "/sys/kernel"
+    - "/sys/fs/cgroup"
+    - "/var/run/docker.sock"
+    - "/etc/docker"
+    - "/var/lib/docker"
+    - "/proc/sysrq-trigger"
+    - "/proc/kcore"
+    - "/proc/kallsyms"
+    - "/dev/mem"
+    - "/dev/kmem"
+    
+  read_only_paths:
+    - "/proc"
+    - "/sys"
+    - "/dev"
+    
+  # Mount restrictions
+  denied_mount_types:
+    - "proc"
+    - "sysfs"
+    - "debugfs"
+    - "devpts"
+    - "securityfs"
+    
+  mount_options_required:
+    - "nosuid"
+    - "nodev"
+    - "noexec"
+    
+  # Network restrictions
+  denied_ports:
+    - 22    # SSH
+    - 111   # RPC
+    - 2049  # NFS
+    - 6000  # X11
+    
+  # Resource limits
+  resource_limits:
+    memory_max: "2G"
+    cpu_quota: "200%"
+    pids_max: 1024
+    open_files: 65536
+    
+# Privileged container policy
+privileged_containers:
+  # Additional restrictions even for privileged containers
+  denied_operations:
+    - "module_load"
+    - "firmware_load"
+    - "kexec"
+    - "kernel_module"
+    
+  audit_all_operations: true
+  
+# Container escape detection
+escape_detection:
+  patterns:
+    - "/proc/self/exe"
+    - "/proc/*/ns"
+    - "/.dockerenv"
+    - "/var/run/secrets"
+    
+  suspicious_syscalls:
+    - "ptrace"
+    - "process_vm_readv"
+    - "process_vm_writev"
+    - "kcmp"
+    
+# Per-runtime policies
+runtime_policies:
+  docker:
+    allow_docker_sock_access: false
+    enforce_user_namespace: true
+    
+  kubernetes:
+    enforce_pod_security_standards: true
+    deny_host_network: true
+    deny_host_pid: true
+    deny_host_ipc: true
+    
+# Seccomp profiles
+seccomp_profiles:
+  default:
+    # Dangerous syscalls to block
+    blocked_syscalls:
+      - "add_key"
+      - "bpf"
+      - "clock_adjtime"
+      - "clock_settime"
+      - "create_module"
+      - "delete_module"
+      - "finit_module"
+      - "get_kernel_syms"
+      - "get_mempolicy"
+      - "init_module"
+      - "ioperm"
+      - "iopl"
+      - "kcmp"
+      - "kexec_file_load"
+      - "kexec_load"
+      - "keyctl"
+      - "lookup_dcookie"
+      - "mbind"
+      - "mount"
+      - "move_pages"
+      - "name_to_handle_at"
+      - "nfsservctl"
+      - "open_by_handle_at"
+      - "perf_event_open"
+      - "personality"
+      - "pivot_root"
+      - "process_vm_readv"
+      - "process_vm_writev"
+      - "ptrace"
+      - "query_module"
+      - "quotactl"
+      - "reboot"
+      - "request_key"
+      - "set_mempolicy"
+      - "setns"
+      - "settimeofday"
+      - "stime"
+      - "swapon"
+      - "swapoff"
+      - "sysfs"
+      - "umount"
+      - "umount2"
+      - "unshare"
+      - "uselib"
+      - "userfaultfd"
+      - "ustat"
+      - "vm86"
+      - "vm86old"
+
+# Audit configuration
+audit:
+  # Events to always audit
+  always_audit:
+    - "container_escape_attempt"
+    - "privileged_operation"
+    - "capability_use"
+    - "mount_operation"
+    
+  # Rate limiting for audit events
+  rate_limit:
+    events_per_second: 100
+    burst: 500

@@ -197,6 +197,13 @@ static int hardening_bprm_creds_for_exec(struct linux_binprm *bprm)
 
 	/* Initialize for new process */
 	ctx->flags |= HARDENING_FLAG_LEARNING;
+	
+	/* Initialize container context if in container */
+	if (hardening_is_container_process()) {
+		int ret = hardening_init_container_context(ctx);
+		if (ret)
+			return ret;
+	}
 
 	pr_debug("hardening: initialized task context for %s\n", bprm->filename);
 	return 0;
@@ -259,6 +266,13 @@ static int hardening_capable(const struct cred *cred,
 	if (!ctx)
 		return 0;
 
+	/* Container-specific capability restrictions */
+	if (hardening_is_container_process()) {
+		int ret = hardening_container_capable(cap);
+		if (ret)
+			return ret;
+	}
+	
 	/* Check capability against current security level */
 	return hardening_check_capability(ctx, cap);
 }
@@ -267,6 +281,7 @@ static int hardening_file_open(struct file *file)
 {
 	struct hardening_task_ctx *ctx;
 	const struct cred *cred;
+	int ret;
 
 	if (!hardening_enabled)
 		return 0;
@@ -277,7 +292,23 @@ static int hardening_file_open(struct file *file)
 		return 0;
 
 	/* Check temporal access control */
-	return hardening_check_time_access(ctx);
+	ret = hardening_check_time_access(ctx);
+	if (ret)
+		return ret;
+		
+	/* Container-specific checks */
+	if (hardening_is_container_process()) {
+		ret = hardening_container_file_open(file);
+		if (ret)
+			return ret;
+			
+		/* Check Docker socket access */
+		ret = hardening_docker_socket_access(file);
+		if (ret)
+			return ret;
+	}
+	
+	return 0;
 }
 
 /* File permission check - use this as periodic check point */
@@ -383,9 +414,32 @@ static int hardening_socket_create_hook(int family, int type,
 static int hardening_socket_connect_hook(struct socket *sock,
 					 struct sockaddr *address, int addrlen)
 {
+	int ret;
+	
+	/* Container network isolation */
+	if (hardening_is_container_process()) {
+		ret = hardening_container_socket_connect(sock, address, addrlen);
+		if (ret)
+			return ret;
+	}
+	
 	return hardening_socket_connect(sock, address, addrlen);
 }
 #endif
+
+static int hardening_sb_mount(const char *dev_name, const struct path *path,
+			      const char *type, unsigned long flags, void *data)
+{
+	if (!hardening_enabled)
+		return 0;
+		
+	/* Container mount restrictions */
+	if (hardening_is_container_process()) {
+		return hardening_container_sb_mount(dev_name, path, type, flags);
+	}
+	
+	return 0;
+}
 
 static struct security_hook_list hardening_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(ptrace_access_check, hardening_ptrace_access_check),
@@ -398,6 +452,7 @@ static struct security_hook_list hardening_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(task_prctl, hardening_task_prctl),
 	LSM_HOOK_INIT(mmap_addr, hardening_mmap_addr),
 	LSM_HOOK_INIT(file_mprotect, hardening_file_mprotect),
+	LSM_HOOK_INIT(sb_mount, hardening_sb_mount),
 #ifdef CONFIG_SECURITY_HARDENING_NETWORK
 	LSM_HOOK_INIT(socket_create, hardening_socket_create_hook),
 	LSM_HOOK_INIT(socket_connect, hardening_socket_connect_hook),

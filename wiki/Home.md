@@ -4,9 +4,17 @@ A hardened Linux kernel fork with automated builds and security patches.
 
 ## Quick Start
 
-**Download**: [Latest Release](https://github.com/einyx/linux/releases/latest)
+**APT Repository** (Debian/Ubuntu):
+```bash
+# Add repository
+wget -O - https://kain.example.com/kain-repo.asc | sudo apt-key add -
+echo "deb https://kain.example.com stable main" | sudo tee /etc/apt/sources.list.d/kain.list
+sudo apt update && sudo apt install linux-image-kain
+```
 
-**Install**:
+**Direct Download**: [Latest Release](https://github.com/einyx/linux/releases/latest)
+
+**Manual Install**:
 ```bash
 # Debian/Ubuntu
 wget -O kernel.deb [latest-release-url]

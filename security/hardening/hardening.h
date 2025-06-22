@@ -114,10 +114,41 @@ struct hardening_lineage {
 
 /* Container Context */
 struct hardening_container_ctx {
-	u64 container_id;	/* From cgroup */
+	u64 container_id;		/* From cgroup */
 	char container_name[64];
 	u32 container_flags;
 	struct list_head list;
+	
+	/* Runtime detection */
+	enum container_runtime_type {
+		RUNTIME_NONE = 0,
+		RUNTIME_DOCKER,
+		RUNTIME_CONTAINERD,
+		RUNTIME_PODMAN,
+		RUNTIME_K8S,
+	} runtime;
+	
+	/* Security configuration */
+	bool privileged;
+	bool host_network;
+	bool host_pid;
+	bool host_ipc;
+	
+	/* Isolation level */
+	enum container_isolation_level {
+		CONTAINER_ISOLATION_NONE = 0,
+		CONTAINER_ISOLATION_NORMAL,
+		CONTAINER_ISOLATION_STRICT,
+	} isolation_level;
+	
+	/* Resource limits */
+	u64 memory_limit;
+	u32 cpu_quota;
+	u32 mount_count;
+	
+	/* Syscall filtering */
+	const int *syscall_whitelist;
+	u32 syscall_count;
 };
 
 /* Network Behavior Profile */
@@ -317,12 +348,20 @@ bool hardening_is_suspicious_lineage(struct hardening_lineage *lineage);
 void hardening_free_lineage(struct hardening_lineage *lineage);
 
 /* Container support */
-int hardening_init_container_ctx(struct hardening_task_ctx *ctx);
+int hardening_init_container_context(struct hardening_task_ctx *ctx);
 int hardening_get_container_id(u64 *container_id);
 int hardening_apply_container_policy(struct hardening_task_ctx *ctx);
 void hardening_free_container_ctx(struct hardening_container_ctx *container);
 int hardening_check_container_operation(struct hardening_task_ctx *ctx, int op_type);
 bool hardening_detect_container_escape(struct hardening_task_ctx *ctx);
+bool hardening_is_container_process(void);
+int hardening_container_file_open(struct file *file);
+int hardening_container_capable(int cap);
+int hardening_container_sb_mount(const char *dev_name, const struct path *path,
+				 const char *type, unsigned long flags);
+int hardening_container_socket_connect(struct socket *sock,
+				       struct sockaddr *address, int addrlen);
+int hardening_docker_socket_access(struct file *file);
 
 /* Network profiling */
 int hardening_init_network_profile(struct hardening_task_ctx *ctx);
