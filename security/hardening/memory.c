@@ -13,6 +13,7 @@
 #include <linux/sched/task_stack.h>
 #include <linux/cred.h>
 #include "../security_ratelimit.h"
+#include "../security_audit.h"
 #include "hardening.h"
 
 /* Forward declarations */
@@ -97,12 +98,16 @@ int hardening_track_memory_operation(struct hardening_task_ctx *ctx,
 			
 			/* Check for RWX mappings */
 			if ((prot & PROT_READ) && (prot & PROT_WRITE)) {
+				uid_t uid = from_kuid(&init_user_ns, current_uid());
 				memory->rwx_mappings++;
-				pr_notice("hardening: RWX mapping detected at %lx\n", addr);
+				security_audit_log(AUDIT_MEMORY_ANOMALY, uid,
+						   "rwx_mapping addr=0x%lx size=%zu",
+						   addr, len);
 				
 				/* Check for potential ROP chain */
 				if (detect_rop_chain(addr, len)) {
 					memory->rop_chain_suspected = true;
+					security_audit_exploit("rop_chain", uid);
 				}
 			}
 		}
@@ -253,28 +258,34 @@ int hardening_detect_exploit_attempt(struct hardening_task_ctx *ctx)
 	
 	/* Check for heap spray */
 	if (detect_heap_spray(memory)) {
-		pr_alert("hardening: heap spray attack detected\n");
+		uid_t uid = from_kuid(&init_user_ns, current_uid());
+		security_audit_exploit("heap_spray", uid);
 		exploit_detected = true;
 	}
 	
 	/* Check for excessive RWX mappings */
 	if (memory->rwx_mappings > MAX_RWX_MAPPINGS) {
-		pr_alert("hardening: excessive RWX mappings (%u)\n",
-			 memory->rwx_mappings);
+		uid_t uid = from_kuid(&init_user_ns, current_uid());
+		security_audit_log(AUDIT_MEMORY_ANOMALY, uid,
+				   "excessive_rwx_mappings count=%u",
+				   memory->rwx_mappings);
 		memory->rop_chain_suspected = true;
 		exploit_detected = true;
 	}
 	
 	/* Check for suspicious mprotect changes */
 	if (memory->mprotect_count > MAX_MPROTECT_CHANGES) {
-		pr_alert("hardening: excessive mprotect calls (%u)\n",
-			 memory->mprotect_count);
+		uid_t uid = from_kuid(&init_user_ns, current_uid());
+		security_audit_log(AUDIT_MEMORY_ANOMALY, uid,
+				   "excessive_mprotect_calls count=%u",
+				   memory->mprotect_count);
 		exploit_detected = true;
 	}
 	
 	/* Check for stack pivots */
 	if (memory->stack_pivots > 0) {
-		pr_alert("hardening: stack pivot attempt detected\n");
+		uid_t uid = from_kuid(&init_user_ns, current_uid());
+		security_audit_exploit("stack_pivot", uid);
 		exploit_detected = true;
 	}
 	

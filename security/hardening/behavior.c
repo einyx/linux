@@ -17,6 +17,7 @@
 #include <linux/log2.h>
 #include <linux/cred.h>
 #include "../security_ratelimit.h"
+#include "../security_audit.h"
 #include "hardening.h"
 
 /* Pattern matching parameters */
@@ -300,17 +301,19 @@ int hardening_check_anomaly(struct hardening_task_ctx *ctx)
 	
 	/* Check if anomaly threshold exceeded */
 	if (behavior->anomaly_score > HARDENING_ANOMALY_THRESHOLD) {
+		uid_t uid = from_kuid(&init_user_ns, current_uid());
+		
+		/* Log to audit framework */
+		security_audit_log(AUDIT_BEHAVIOR_ANOMALY, uid,
+				   "process=%s pid=%d score=%u complexity=%u",
+				   current->comm, current->pid,
+				   behavior->anomaly_score, complexity_score);
+		
 		if (hardening_enforce) {
-			pr_notice("hardening: behavioral anomaly detected "
-				  "(score: %u, complexity: %u) for %s[%d]\n",
-				  behavior->anomaly_score, complexity_score,
-				  current->comm, current->pid);
+			/* Escalate security level */
+			hardening_escalate_security(ctx);
+			return -EACCES;
 		}
-		
-		/* Escalate security level */
-		hardening_escalate_security(ctx);
-		
-		return -EACCES;
 	}
 	
 	return 0;
