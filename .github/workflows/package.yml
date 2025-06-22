@@ -66,17 +66,18 @@ jobs:
       with:
         fetch-depth: 0
     
-    - name: Configure git safe directory
-      run: git config --global --add safe.directory $PWD
-    
     - name: Install dependencies
       run: |
+        dnf install -y git
         dnf install -y rpm-build make gcc bc openssl-devel elfutils-libelf-devel
-        dnf install -y bison flex perl-devel perl-generators hostname git
+        dnf install -y bison flex perl-devel perl-generators hostname
         dnf install -y rsync tar
         if [ "${{ matrix.arch }}" = "aarch64" ]; then
           dnf install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
         fi
+    
+    - name: Configure git safe directory
+      run: git config --global --add safe.directory $PWD
     
     - name: Configure kernel
       run: |
