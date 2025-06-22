@@ -11,6 +11,8 @@
 #include <linux/mman.h>
 #include <linux/random.h>
 #include <linux/sched/task_stack.h>
+#include <linux/cred.h>
+#include "../security_ratelimit.h"
 #include "hardening.h"
 
 /* Forward declarations */
@@ -223,11 +225,31 @@ int hardening_detect_exploit_attempt(struct hardening_task_ctx *ctx)
 {
 	struct hardening_memory_profile *memory;
 	bool exploit_detected = false;
+	static struct security_ratelimit_ctx *exploit_ratelimit = NULL;
+	int ret;
 	
 	if (!ctx || !ctx->memory)
 		return 0;
 		
 	memory = ctx->memory;
+	
+	/* Initialize rate limiting on first use */
+	if (!exploit_ratelimit) {
+		exploit_ratelimit = security_ratelimit_init(
+			50,	/* 50 checks per interval */
+			5000);	/* 5 second interval */
+		if (!exploit_ratelimit)
+			pr_warn("hardening: failed to init exploit detection rate limiting\n");
+	}
+	
+	/* Check rate limit for exploit detection */
+	if (exploit_ratelimit) {
+		ret = security_ratelimit_check_log(exploit_ratelimit,
+			from_kuid(&init_user_ns, current_uid()),
+			"exploit_detection");
+		if (ret == -EBUSY)
+			return 0; /* Skip this check due to rate limiting */
+	}
 	
 	/* Check for heap spray */
 	if (detect_heap_spray(memory)) {
