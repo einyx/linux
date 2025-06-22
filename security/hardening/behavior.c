@@ -15,6 +15,8 @@
 #include <linux/sched.h>
 #include <linux/random.h>
 #include <linux/log2.h>
+#include <linux/cred.h>
+#include "../security_ratelimit.h"
 #include "hardening.h"
 
 /* Pattern matching parameters */
@@ -157,11 +159,30 @@ int hardening_update_behavior(struct hardening_task_ctx *ctx, int syscall_nr)
 	unsigned long flags;
 	u32 old_syscall;
 	u32 prev_syscall;
+	static struct security_ratelimit_ctx *ratelimit_ctx = NULL;
 	
 	if (!ctx || !ctx->behavior)
 		return 0;
 		
 	behavior = ctx->behavior;
+	
+	/* Initialize rate limiting on first use */
+	if (!ratelimit_ctx) {
+		ratelimit_ctx = security_ratelimit_init(
+			200,	/* 200 checks per interval */
+			1000);	/* 1 second interval */
+		if (!ratelimit_ctx)
+			pr_warn("hardening: failed to init behavior rate limiting\n");
+	}
+	
+	/* Check rate limit */
+	if (ratelimit_ctx) {
+		int ret = security_ratelimit_check_log(ratelimit_ctx,
+			from_kuid(&init_user_ns, current_uid()),
+			"behavior_update");
+		if (ret == -EBUSY)
+			return 0; /* Skip this update due to rate limiting */
+	}
 	
 	spin_lock_irqsave(&behavior->lock, flags);
 	
