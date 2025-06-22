@@ -108,7 +108,7 @@ int security_ratelimit_check(struct security_ratelimit_ctx *ctx, uid_t uid)
 			rcu_read_unlock();
 			return -EBUSY;
 		}
-		
+
 		if (time_after(now, entry->last_time + ctx->interval_jiffies)) {
 			/* New interval, reset counter */
 			spin_lock_irqsave(&ctx->locks[hash], flags);
@@ -131,25 +131,25 @@ int security_ratelimit_check(struct security_ratelimit_ctx *ctx, uid_t uid)
 	} else {
 		/* Create new entry */
 		struct security_ratelimit_entry *new_entry;
-		
+
 		rcu_read_unlock();
-		
+
 		new_entry = kmalloc(sizeof(*new_entry), GFP_ATOMIC);
 		if (!new_entry)
 			return 0; /* Allow on allocation failure */
-		
+
 		new_entry->uid = uid;
 		new_entry->last_time = now;
 		new_entry->count = 1;
 		new_entry->blocked = false;
-		
+
 		spin_lock_irqsave(&ctx->locks[hash], flags);
 		list_add_rcu(&new_entry->list, &ctx->buckets[hash]);
 		spin_unlock_irqrestore(&ctx->locks[hash], flags);
-		
+
 		return 0;
 	}
-	
+
 	rcu_read_unlock();
 	return ret;
 }
@@ -218,7 +218,7 @@ static int __init security_ratelimit_module_init(void)
 	global_ratelimit_ctx = security_ratelimit_init(
 		SECURITY_RATELIMIT_BURST,
 		jiffies_to_msecs(SECURITY_RATELIMIT_INTERVAL));
-	
+
 	if (!global_ratelimit_ctx) {
 		pr_err("Failed to initialize security rate limiting\n");
 		return -ENOMEM;

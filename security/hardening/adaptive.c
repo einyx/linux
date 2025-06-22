@@ -94,16 +94,16 @@ void hardening_escalate_security(struct hardening_task_ctx *ctx)
 {
 	unsigned long flags;
 	u64 now = ktime_get_ns();
-	
+
 	if (!ctx)
 		return;
-		
+
 	spin_lock_irqsave(&ctx->lock, flags);
-	
+
 	/* Update violation tracking */
 	ctx->violation_count++;
 	ctx->last_violation_time = now;
-	
+
 	/* Determine new security level based on violations */
 	if (ctx->violation_count >= VIOLATIONS_FOR_CRITICAL) {
 		ctx->sec_level = HARDENING_LEVEL_CRITICAL;
@@ -114,9 +114,9 @@ void hardening_escalate_security(struct hardening_task_ctx *ctx)
 		if (ctx->sec_level == HARDENING_LEVEL_NORMAL)
 			ctx->sec_level = HARDENING_LEVEL_ELEVATED;
 	}
-	
+
 	spin_unlock_irqrestore(&ctx->lock, flags);
-	
+
 	pr_notice("hardening: security level escalated to %s for %s[%d] "
 		  "(violations: %u)\n",
 		  security_level_names[ctx->sec_level],
@@ -129,19 +129,19 @@ void hardening_deescalate_security(struct hardening_task_ctx *ctx)
 	unsigned long flags;
 	u64 now = ktime_get_ns();
 	u64 time_since_violation;
-	
+
 	if (!ctx)
 		return;
-		
+
 	spin_lock_irqsave(&ctx->lock, flags);
-	
+
 	/* Check if enough time has passed since last violation */
 	time_since_violation = now - ctx->last_violation_time;
 	if (time_since_violation > VIOLATION_DECAY_TIME_NS) {
 		/* Decay violations */
 		if (ctx->violation_count > 0)
 			ctx->violation_count--;
-			
+
 		/* Lower security level if appropriate */
 		if (ctx->violation_count == 0 && ctx->sec_level > HARDENING_LEVEL_NORMAL) {
 			ctx->sec_level--;
@@ -149,29 +149,29 @@ void hardening_deescalate_security(struct hardening_task_ctx *ctx)
 				 security_level_names[ctx->sec_level],
 				 current->comm, current->pid);
 		}
-		
+
 		ctx->last_violation_time = now;
 	}
-	
+
 	spin_unlock_irqrestore(&ctx->lock, flags);
 }
 
 int hardening_check_capability(struct hardening_task_ctx *ctx, int cap)
 {
 	const struct security_level_policy *policy;
-	
+
 	if (!ctx || ctx->sec_level >= HARDENING_LEVEL_MAX)
 		return 0;
-		
+
 	policy = &level_policies[ctx->sec_level];
-	
+
 	/* Check if capability is denied at current level */
 	if (policy->denied_capabilities & CAP_TO_MASK(cap)) {
 		pr_notice("hardening: capability %d denied at security level %s\n",
 			  cap, security_level_names[ctx->sec_level]);
 		return -EPERM;
 	}
-	
+
 	return 0;
 }
 
@@ -179,12 +179,12 @@ int hardening_check_resource_limit(struct hardening_task_ctx *ctx,
 				   int resource_type, u32 value)
 {
 	const struct security_level_policy *policy;
-	
+
 	if (!ctx || ctx->sec_level >= HARDENING_LEVEL_MAX)
 		return 0;
-		
+
 	policy = &level_policies[ctx->sec_level];
-	
+
 	switch (resource_type) {
 	case 0:	/* File descriptors */
 		if (policy->max_file_descriptors > 0 &&
@@ -197,7 +197,7 @@ int hardening_check_resource_limit(struct hardening_task_ctx *ctx,
 			return -EAGAIN;
 		break;
 	}
-	
+
 	return 0;
 }
 

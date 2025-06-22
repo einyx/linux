@@ -106,15 +106,12 @@ static struct hardening_task_ctx *hardening_alloc_task_ctx(void)
 
 	return ctx;
 
-#ifdef CONFIG_SECURITY_HARDENING_RESOURCES
 err_resources:
 #ifdef CONFIG_SECURITY_HARDENING_BEHAVIOR
-	hardening_free_behavior_profile(ctx->behavior);
+	if (ctx->behavior)
+		hardening_free_behavior_profile(ctx->behavior);
 #endif
-#endif
-#ifdef CONFIG_SECURITY_HARDENING_BEHAVIOR
 err_behavior:
-#endif
 	kfree(ctx);
 	return NULL;
 }
@@ -127,12 +124,12 @@ static void hardening_free_task_ctx(struct hardening_task_ctx *ctx)
 #ifdef CONFIG_SECURITY_HARDENING_TEMPORAL
 	hardening_cleanup_time_rules(ctx);
 #endif
-	
+
 #ifdef CONFIG_SECURITY_HARDENING_BEHAVIOR
 	if (ctx->behavior)
 		hardening_free_behavior_profile(ctx->behavior);
 #endif
-	
+
 #ifdef CONFIG_SECURITY_HARDENING_RESOURCES
 	if (ctx->resources)
 		hardening_free_resource_baseline(ctx->resources);
@@ -167,7 +164,7 @@ static void hardening_free_task_ctx(struct hardening_task_ctx *ctx)
 	if (ctx->quantum)
 		hardening_free_quantum_ctx(ctx->quantum);
 #endif
-	
+
 	kfree(ctx);
 }
 
@@ -189,7 +186,7 @@ static int hardening_cred_alloc_blank(struct cred *cred, gfp_t gfp)
 static void hardening_cred_free(struct cred *cred)
 {
 	struct hardening_task_ctx *ctx = cred->security;
-	
+
 	if (ctx) {
 		hardening_free_task_ctx(ctx);
 		cred->security = NULL;
@@ -214,7 +211,7 @@ static int hardening_bprm_creds_for_exec(struct linux_binprm *bprm)
 
 	/* Initialize for new process */
 	ctx->flags |= HARDENING_FLAG_LEARNING;
-	
+
 	/* Initialize container context if in container */
 	if (hardening_is_container_process()) {
 		int ret = hardening_init_container_context(ctx);
@@ -289,7 +286,7 @@ static int hardening_capable(const struct cred *cred,
 		if (ret)
 			return ret;
 	}
-	
+
 	/* Check capability against current security level */
 	return hardening_check_capability(ctx, cap);
 }
@@ -312,24 +309,24 @@ static int hardening_file_open(struct file *file)
 	ret = hardening_check_time_access(ctx);
 	if (ret)
 		return ret;
-		
+
 	/* Container-specific checks */
 	if (hardening_is_container_process()) {
 		ret = hardening_container_file_open(file);
 		if (ret)
 			return ret;
-			
+
 		/* Check Docker socket access */
 		ret = hardening_docker_socket_access(file);
 		if (ret)
 			return ret;
 	}
-	
+
 #ifdef CONFIG_SECURITY_HARDENING_QUANTUM
 	/* Require quantum authentication for sensitive files in high security mode */
 	if (ctx->sec_level >= HARDENING_LEVEL_HIGH && file->f_path.dentry) {
 		const char *filename = file->f_path.dentry->d_name.name;
-		
+
 		/* Check for sensitive files */
 		if (strstr(filename, "shadow") || strstr(filename, "private") ||
 		    strstr(filename, "secret") || strstr(filename, "key")) {
@@ -341,7 +338,7 @@ static int hardening_file_open(struct file *file)
 		}
 	}
 #endif
-	
+
 	return 0;
 }
 
@@ -351,7 +348,7 @@ static int hardening_file_permission(struct file *file, int mask)
 	struct hardening_task_ctx *ctx;
 	const struct cred *cred;
 	u64 now;
-	
+
 	if (!hardening_enabled)
 		return 0;
 
@@ -368,7 +365,7 @@ static int hardening_file_permission(struct file *file, int mask)
 	now = ktime_get_ns();
 	if (now - ctx->last_resource_check < NSEC_PER_SEC / 10) /* 100ms interval */
 		return 0;
-	
+
 	ctx->last_resource_check = now;
 
 	/* Update resource usage periodically */
@@ -393,10 +390,10 @@ static int hardening_mmap_addr(unsigned long addr)
 {
 	struct hardening_task_ctx *ctx;
 	const struct cred *cred;
-	
+
 	if (!hardening_enabled)
 		return 0;
-		
+
 	cred = current_cred();
 	ctx = cred->security;
 	if (!ctx)
@@ -414,10 +411,10 @@ static int hardening_file_mprotect(struct vm_area_struct *vma,
 {
 	struct hardening_task_ctx *ctx;
 	const struct cred *cred;
-	
+
 	if (!hardening_enabled)
 		return 0;
-		
+
 	cred = current_cred();
 	ctx = cred->security;
 	if (!ctx)
@@ -449,14 +446,14 @@ static int hardening_socket_connect_hook(struct socket *sock,
 					 struct sockaddr *address, int addrlen)
 {
 	int ret;
-	
+
 	/* Container network isolation */
 	if (hardening_is_container_process()) {
 		ret = hardening_container_socket_connect(sock, address, addrlen);
 		if (ret)
 			return ret;
 	}
-	
+
 	return hardening_socket_connect(sock, address, addrlen);
 }
 #endif
@@ -466,12 +463,12 @@ static int hardening_sb_mount(const char *dev_name, const struct path *path,
 {
 	if (!hardening_enabled)
 		return 0;
-		
+
 	/* Container mount restrictions */
 	if (hardening_is_container_process()) {
 		return hardening_container_sb_mount(dev_name, path, type, flags);
 	}
-	
+
 	return 0;
 }
 
@@ -530,7 +527,7 @@ static int __init hardening_init(void)
 
 	security_add_hooks(hardening_hooks, ARRAY_SIZE(hardening_hooks),
 			   &hardening_lsmid);
-	
+
 	hardening_init_sysctl();
 
 	pr_info("Security Hardening Module initialized\n");
@@ -540,7 +537,7 @@ static int __init hardening_init(void)
 static int __init hardening_fs_init(void)
 {
 	pr_info("hardening: late init starting\n");
-	
+
 #ifdef CONFIG_SECURITYFS
 	if (hardening_init_securityfs() < 0)
 		pr_warn("hardening: failed to initialize securityfs\n");

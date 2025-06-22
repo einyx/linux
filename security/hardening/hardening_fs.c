@@ -23,16 +23,16 @@ static int hardening_status_show(struct seq_file *m, void *v)
 	const char *sec_level_names[] = {
 		"Normal", "Elevated", "High", "Critical"
 	};
-	
+
 	seq_printf(m, "Security Hardening Module Status\n");
 	seq_printf(m, "================================\n\n");
-	
+
 	seq_printf(m, "Global Settings:\n");
-	seq_printf(m, "  Module enabled: %s\n", 
+	seq_printf(m, "  Module enabled: %s\n",
 		   hardening_enabled ? "yes" : "no");
 	seq_printf(m, "  Enforcement mode: %s\n",
 		   hardening_enforce ? "enforcing" : "permissive");
-	
+
 	cred = current_cred();
 	ctx = cred->security;
 	if (ctx) {
@@ -44,13 +44,13 @@ static int hardening_status_show(struct seq_file *m, void *v)
 			   ctx->sec_level);
 		seq_printf(m, "  Violations: %u\n", ctx->violation_count);
 		seq_printf(m, "  Flags: 0x%08x\n", ctx->flags);
-		
+
 #ifdef CONFIG_SECURITY_HARDENING_TEMPORAL
 		seq_printf(m, "\nTemporal Control:\n");
 		seq_printf(m, "  Time restricted: %s\n",
 			   ctx->time_restricted ? "yes" : "no");
 #endif
-		
+
 #ifdef CONFIG_SECURITY_HARDENING_BEHAVIOR
 		if (ctx->behavior) {
 			seq_printf(m, "\nBehavioral Analysis:\n");
@@ -62,7 +62,7 @@ static int hardening_status_show(struct seq_file *m, void *v)
 				   ctx->behavior->total_transitions);
 		}
 #endif
-		
+
 #ifdef CONFIG_SECURITY_HARDENING_RESOURCES
 		if (ctx->resources) {
 			seq_printf(m, "\nResource Monitoring:\n");
@@ -140,7 +140,7 @@ static int hardening_status_show(struct seq_file *m, void *v)
 		}
 #endif
 	}
-	
+
 	return 0;
 }
 
@@ -161,15 +161,15 @@ static int hardening_stats_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "Security Hardening Module Statistics\n");
 	seq_printf(m, "====================================\n\n");
-	
+
 	seq_printf(m, "Global Statistics:\n");
 	seq_printf(m, "  Module enabled: %s\n",
 		   hardening_enabled ? "yes" : "no");
 	seq_printf(m, "  Enforcement mode: %s\n",
 		   hardening_enforce ? "enforcing" : "permissive");
-	
+
 	/* TODO: Add more global statistics */
-	
+
 	return 0;
 }
 
@@ -193,14 +193,14 @@ static ssize_t hardening_policy_write(struct file *file,
 	char *kbuf;
 	char *p, *cmd, *arg;
 	int ret = count;
-	
+
 	if (count > PAGE_SIZE)
 		return -E2BIG;
-		
+
 	kbuf = memdup_user_nul(buf, count);
 	if (IS_ERR(kbuf))
 		return PTR_ERR(kbuf);
-	
+
 	/* Simple command parser */
 	p = kbuf;
 	cmd = strsep(&p, " \t");
@@ -208,9 +208,9 @@ static ssize_t hardening_policy_write(struct file *file,
 		ret = -EINVAL;
 		goto out;
 	}
-	
+
 	arg = strsep(&p, " \t\n");
-	
+
 	if (strcmp(cmd, "enable") == 0) {
 		hardening_enabled = 1;
 		pr_info("hardening: module enabled\n");
@@ -227,7 +227,7 @@ static ssize_t hardening_policy_write(struct file *file,
 		pr_err("hardening: unknown command '%s'\n", cmd);
 		ret = -EINVAL;
 	}
-	
+
 out:
 	kfree(kbuf);
 	return ret;
@@ -248,20 +248,20 @@ static int hardening_quantum_show(struct seq_file *m, void *v)
 		"KYBER768", "KYBER1024", "DILITHIUM3", "DILITHIUM5",
 		"FALCON512", "SPHINCS+"
 	};
-	
+
 	cred = current_cred();
 	ctx = cred->security;
-	
+
 	seq_printf(m, "Quantum-Resistant Cryptography Status\n");
 	seq_printf(m, "====================================\n\n");
-	
+
 	if (!ctx || !ctx->quantum) {
 		seq_printf(m, "Quantum crypto not initialized for this process\n");
 		return 0;
 	}
-	
+
 	seq_printf(m, "Configuration:\n");
-	seq_printf(m, "  Preferred KEM: %s\n", 
+	seq_printf(m, "  Preferred KEM: %s\n",
 		   algo_names[ctx->quantum->preferred_kem]);
 	seq_printf(m, "  Preferred Signature: %s\n",
 		   algo_names[ctx->quantum->preferred_sig]);
@@ -271,19 +271,19 @@ static int hardening_quantum_show(struct seq_file *m, void *v)
 		   ctx->quantum->allow_classical_fallback ? "yes" : "no");
 	seq_printf(m, "  Min security level: %u\n",
 		   ctx->quantum->min_security_level);
-	
+
 	seq_printf(m, "\nStatistics:\n");
 	seq_printf(m, "  Keys generated: %llu\n", ctx->quantum->keys_generated);
 	seq_printf(m, "  Signatures created: %llu\n", ctx->quantum->signatures_created);
 	seq_printf(m, "  Signatures verified: %llu\n", ctx->quantum->signatures_verified);
 	seq_printf(m, "  Key exchanges: %llu\n", ctx->quantum->key_exchanges);
 	seq_printf(m, "  Active channels: %u\n", ctx->quantum->active_channels);
-	
+
 	if (ctx->quantum->identity_key) {
 		u64 now = ktime_get_real_seconds();
 		u64 remaining = ctx->quantum->identity_key->expiration_time > now ?
 				ctx->quantum->identity_key->expiration_time - now : 0;
-		
+
 		seq_printf(m, "\nIdentity Key:\n");
 		seq_printf(m, "  Algorithm: %s\n",
 			   algo_names[ctx->quantum->identity_key->pq_algo]);
@@ -291,7 +291,7 @@ static int hardening_quantum_show(struct seq_file *m, void *v)
 		seq_printf(m, "  Usage count: %u\n",
 			   ctx->quantum->identity_key->usage_count);
 	}
-	
+
 	return 0;
 }
 
@@ -308,25 +308,25 @@ static ssize_t hardening_quantum_write(struct file *file, const char __user *ubu
 	const struct cred *cred;
 	char *kbuf, *cmd;
 	ssize_t ret = count;
-	
+
 	if (count > PAGE_SIZE)
 		return -E2BIG;
-	
+
 	kbuf = memdup_user_nul(ubuf, count);
 	if (IS_ERR(kbuf))
 		return PTR_ERR(kbuf);
-	
+
 	cmd = strstrip(kbuf);
-	
+
 	cred = current_cred();
 	ctx = cred->security;
-	
+
 	if (!ctx || !ctx->quantum) {
 		pr_err("hardening: quantum crypto not initialized\n");
 		ret = -EINVAL;
 		goto out;
 	}
-	
+
 	if (strcmp(cmd, "rotate") == 0) {
 		ret = hardening_quantum_rotate_keys(ctx->quantum);
 		if (ret == 0) {
@@ -355,7 +355,7 @@ static ssize_t hardening_quantum_write(struct file *file, const char __user *ubu
 		pr_err("hardening: unknown quantum command '%s'\n", cmd);
 		ret = -EINVAL;
 	}
-	
+
 out:
 	kfree(kbuf);
 	return ret;
@@ -373,16 +373,16 @@ static const struct file_operations hardening_quantum_fops = {
 int hardening_init_securityfs(void)
 {
 	pr_info("hardening: initializing securityfs interface\n");
-	
+
 	hardening_dir = securityfs_create_dir("hardening", NULL);
 	if (IS_ERR(hardening_dir)) {
-		pr_err("hardening: failed to create securityfs directory (err=%ld)\n", 
+		pr_err("hardening: failed to create securityfs directory (err=%ld)\n",
 		       PTR_ERR(hardening_dir));
 		return PTR_ERR(hardening_dir);
 	}
-	
+
 	pr_info("hardening: created securityfs directory successfully\n");
-	
+
 	status_file = securityfs_create_file("status", 0444,
 					     hardening_dir, NULL,
 					     &hardening_status_fops);
@@ -390,7 +390,7 @@ int hardening_init_securityfs(void)
 		pr_err("hardening: failed to create status file\n");
 		goto err;
 	}
-	
+
 	stats_file = securityfs_create_file("stats", 0444,
 					    hardening_dir, NULL,
 					    &hardening_stats_fops);
@@ -398,7 +398,7 @@ int hardening_init_securityfs(void)
 		pr_err("hardening: failed to create stats file\n");
 		goto err;
 	}
-	
+
 	policy_file = securityfs_create_file("policy", 0600,
 					     hardening_dir, NULL,
 					     &hardening_policy_fops);
@@ -406,7 +406,7 @@ int hardening_init_securityfs(void)
 		pr_err("hardening: failed to create policy file\n");
 		goto err;
 	}
-	
+
 #ifdef CONFIG_SECURITY_HARDENING_QUANTUM
 	quantum_file = securityfs_create_file("quantum", 0600,
 					      hardening_dir, NULL,
@@ -416,10 +416,10 @@ int hardening_init_securityfs(void)
 		goto err;
 	}
 #endif
-	
+
 	pr_info("hardening: securityfs interface initialized successfully\n");
 	return 0;
-	
+
 err:
 	hardening_exit_securityfs();
 	return -ENOMEM;

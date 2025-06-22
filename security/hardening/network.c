@@ -53,17 +53,17 @@ static const u16 server_ports[] = {
 int hardening_init_network_profile(struct hardening_task_ctx *ctx)
 {
 	struct hardening_network_profile *network;
-	
+
 	network = kzalloc(sizeof(*network), GFP_KERNEL);
 	if (!network)
 		return -ENOMEM;
-		
+
 	/* Initialize port bitmap */
 	bitmap_zero(network->used_ports, 65536);
-	
+
 	network->last_activity = ktime_get_ns();
 	ctx->network = network;
-	
+
 	return 0;
 }
 
@@ -73,30 +73,30 @@ int hardening_update_network_activity(struct hardening_task_ctx *ctx,
 {
 	struct hardening_network_profile *network;
 	u64 now;
-	
+
 	if (!ctx || !ctx->network)
 		return 0;
-		
+
 	network = ctx->network;
 	now = ktime_get_ns();
-	
+
 	/* Update connection statistics using per-CPU counters */
 	if (sock_type == SOCK_STREAM || sock_type == SOCK_DGRAM) {
 		struct hardening_net_stats *stats;
-		
+
 		/* Use per-CPU counter for performance */
 		stats = this_cpu_ptr(&hardening_pcpu_net_stats);
 		stats->connections++;
-		
+
 		/* Periodically sync to main counter */
 		if ((stats->connections & CONNECTION_LOG_INTERVAL) == 0) {
 			network->total_connections += 256;
 		}
-		
+
 		if (result < 0)
 			network->failed_connections++;
 	}
-	
+
 	/* Check connection rate */
 	if (now - network->last_activity < NSEC_PER_SEC) {
 		/* Multiple connections within 1 second */
@@ -104,9 +104,9 @@ int hardening_update_network_activity(struct hardening_task_ctx *ctx,
 	} else {
 		network->packet_rate = 1;
 	}
-	
+
 	network->last_activity = now;
-	
+
 	/* Detect anomalies */
 	return hardening_check_network_anomaly(ctx);
 }
@@ -117,7 +117,7 @@ static void track_port_usage(struct hardening_network_profile *network,
 {
 	if (port == 0 || port > MAX_PORT_NUMBER)
 		return;
-		
+
 	/* Mark port as used */
 	if (!test_and_set_bit(port, network->used_ports)) {
 		/* First time using this port */
@@ -129,7 +129,7 @@ static void track_port_usage(struct hardening_network_profile *network,
 			}
 		}
 	}
-	
+
 	/* Check for suspicious server port access */
 	if (is_connect) {
 		int i;
@@ -147,47 +147,47 @@ int hardening_check_network_anomaly(struct hardening_task_ctx *ctx)
 {
 	struct hardening_network_profile *network;
 	u32 anomaly_score = 0;
-	
+
 	if (!ctx || !ctx->network)
 		return 0;
-		
+
 	network = ctx->network;
-	
+
 	/* Check connection rate */
 	if (network->packet_rate > MAX_CONNECTIONS_PER_MINUTE) {
 		anomaly_score += 20;
 		pr_notice("hardening: high connection rate detected (%u/min)\n",
 			  network->packet_rate);
 	}
-	
+
 	/* Check failed connections */
 	if (network->failed_connections > MAX_FAILED_CONNECTIONS) {
 		anomaly_score += 15;
 		pr_notice("hardening: excessive failed connections (%u)\n",
 			  network->failed_connections);
 	}
-	
+
 	/* Check port scanning */
 	if (network->port_scan_score > PORT_SCAN_WARNING_SCORE) {
 		anomaly_score += 30;
 		pr_notice("hardening: port scanning behavior detected\n");
 	}
-	
+
 	/* Check unique destinations */
 	if (network->unique_destinations > MAX_UNIQUE_DESTINATIONS) {
 		anomaly_score += 10;
 	}
-	
+
 	/* Update total anomaly score */
 	network->network_anomaly_score = anomaly_score;
-	
+
 	/* Escalate security if needed */
 	if (anomaly_score > ANOMALY_SCORE_THRESHOLD && hardening_enforce) {
 		hardening_escalate_security(ctx);
 		atomic64_inc(&hardening_global_stats.network_anomalies);
 		return -EACCES;
 	}
-	
+
 	return 0;
 }
 
@@ -196,12 +196,12 @@ int hardening_socket_create(int family, int type, int protocol)
 {
 	struct hardening_task_ctx *ctx;
 	const struct cred *cred;
-	
+
 	cred = current_cred();
 	ctx = cred->security;
 	if (!ctx || !ctx->network)
 		return 0;
-		
+
 	/* Track socket creation */
 	return hardening_update_network_activity(ctx, type, 0);
 }
@@ -212,12 +212,12 @@ int hardening_socket_connect(struct socket *sock,
 	struct hardening_task_ctx *ctx;
 	const struct cred *cred;
 	u16 port = 0;
-	
+
 	cred = current_cred();
 	ctx = cred->security;
 	if (!ctx || !ctx->network)
 		return 0;
-		
+
 	/* Extract port from address */
 	if (address->sa_family == AF_INET) {
 		struct sockaddr_in *addr = (struct sockaddr_in *)address;
@@ -226,13 +226,13 @@ int hardening_socket_connect(struct socket *sock,
 		struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)address;
 		port = ntohs(addr6->sin6_port);
 	}
-	
+
 	/* Track port usage */
 	if (port > 0 && ctx->network) {
 		track_port_usage(ctx->network, port, true);
 		ctx->network->unique_destinations++;
 	}
-	
+
 	return hardening_update_network_activity(ctx, sock->type, 0);
 }
 

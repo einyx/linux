@@ -13,18 +13,18 @@
 int hardening_init_crypto(struct hardening_task_ctx *ctx)
 {
 	struct hardening_crypto_ctx *crypto;
-	
+
 	crypto = kzalloc(sizeof(*crypto), GFP_KERNEL);
 	if (!crypto)
 		return -ENOMEM;
-		
+
 	/* Initialize SHA-256 */
 	crypto->tfm = crypto_alloc_shash("sha256", 0, 0);
 	if (IS_ERR(crypto->tfm)) {
 		kfree(crypto);
 		return PTR_ERR(crypto->tfm);
 	}
-	
+
 	crypto->desc = kmalloc(sizeof(struct shash_desc) +
 			       crypto_shash_descsize(crypto->tfm),
 			       GFP_KERNEL);
@@ -33,10 +33,10 @@ int hardening_init_crypto(struct hardening_task_ctx *ctx)
 		kfree(crypto);
 		return -ENOMEM;
 	}
-	
+
 	crypto->desc->tfm = crypto->tfm;
 	ctx->crypto = crypto;
-	
+
 	return 0;
 }
 

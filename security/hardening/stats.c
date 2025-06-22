@@ -38,13 +38,13 @@ int hardening_show_stats(struct seq_file *m, void *v)
 	u64 total_checks = atomic64_read(&hardening_global_stats.total_checks);
 	u64 check_time = atomic64_read(&hardening_global_stats.check_time_ns);
 	u64 avg_check_time = 0;
-	
+
 	if (total_checks > 0)
 		avg_check_time = check_time / total_checks;
-	
+
 	seq_printf(m, "Security Hardening Module Statistics\n");
 	seq_printf(m, "====================================\n\n");
-	
+
 	seq_printf(m, "General Statistics:\n");
 	seq_printf(m, "  Total syscalls monitored: %llu\n",
 		   atomic64_read(&hardening_global_stats.total_syscalls));
@@ -52,7 +52,7 @@ int hardening_show_stats(struct seq_file *m, void *v)
 		   atomic64_read(&hardening_global_stats.blocked_syscalls));
 	seq_printf(m, "  Total security checks: %llu\n", total_checks);
 	seq_printf(m, "  Average check time: %llu ns\n", avg_check_time);
-	
+
 	seq_printf(m, "\nAnomaly Detection:\n");
 	seq_printf(m, "  Total anomalies detected: %llu\n",
 		   atomic64_read(&hardening_global_stats.anomalies_detected));
@@ -64,13 +64,13 @@ int hardening_show_stats(struct seq_file *m, void *v)
 		   atomic64_read(&hardening_global_stats.network_anomalies));
 	seq_printf(m, "  Memory anomalies: %llu\n",
 		   atomic64_read(&hardening_global_stats.memory_anomalies));
-	
+
 	seq_printf(m, "\nPolicy Violations:\n");
 	seq_printf(m, "  Total violations: %llu\n",
 		   atomic64_read(&hardening_global_stats.policy_violations));
 	seq_printf(m, "  Temporal violations: %llu\n",
 		   atomic64_read(&hardening_global_stats.temporal_violations));
-	
+
 	return 0;
 }
 
@@ -93,7 +93,7 @@ void hardening_reset_stats(void)
 	atomic64_set(&hardening_global_stats.resource_violations, 0);
 	atomic64_set(&hardening_global_stats.network_anomalies, 0);
 	atomic64_set(&hardening_global_stats.memory_anomalies, 0);
-	
+
 	pr_info("hardening: statistics reset\n");
 }
 
@@ -107,7 +107,7 @@ void hardening_reset_stats(void)
 void hardening_update_check_time(u64 start_ns)
 {
 	u64 duration = ktime_get_ns() - start_ns;
-	
+
 	atomic64_inc(&hardening_global_stats.total_checks);
 	atomic64_add(duration, &hardening_global_stats.check_time_ns);
 }

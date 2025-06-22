@@ -80,20 +80,20 @@ detect_container_runtime(struct hardening_task_ctx *ctx)
 {
 	struct cgroup *cgrp;
 	char *path;
-	
+
 	rcu_read_lock();
 	cgrp = task_cgroup(current, cpu_cgrp_id);
 	if (!cgrp) {
 		rcu_read_unlock();
 		return RUNTIME_NONE;
 	}
-	
+
 	path = cgroup_path(cgrp, NULL, 0);
 	rcu_read_unlock();
-	
+
 	if (!path)
 		return RUNTIME_NONE;
-		
+
 	/* Check for various container runtimes */
 	if (strstr(path, DOCKER_CGROUP_PREFIX))
 		return RUNTIME_DOCKER;
@@ -103,7 +103,7 @@ detect_container_runtime(struct hardening_task_ctx *ctx)
 		return RUNTIME_PODMAN;
 	else if (strstr(path, K8S_CGROUP_PREFIX))
 		return RUNTIME_K8S;
-		
+
 	kfree(path);
 	return RUNTIME_NONE;
 }
@@ -116,11 +116,11 @@ detect_container_runtime(struct hardening_task_ctx *ctx)
 bool hardening_is_container_process(void)
 {
 	/* Check for container indicators */
-	
+
 	/* 1. Check PID namespace */
 	if (task_active_pid_ns(current) != &init_pid_ns)
 		return true;
-		
+
 	/* 2. Check for /.dockerenv file */
 	struct path path;
 	int ret = kern_path("/.dockerenv", LOOKUP_FOLLOW, &path);
@@ -128,11 +128,11 @@ bool hardening_is_container_process(void)
 		path_put(&path);
 		return true;
 	}
-	
+
 	/* 3. Check cgroup membership */
 	if (detect_container_runtime(NULL) != RUNTIME_NONE)
 		return true;
-		
+
 	return false;
 }
 
@@ -148,22 +148,22 @@ static int check_container_escape_attempt(struct file *file)
 	char *path_buf, *path;
 	int i;
 	uid_t uid;
-	
+
 	if (!file || !file->f_path.dentry)
 		return 0;
-		
+
 	dentry = file->f_path.dentry;
-	
+
 	path_buf = kmalloc(PATH_MAX, GFP_KERNEL);
 	if (!path_buf)
 		return 0;
-		
+
 	path = dentry_path_raw(dentry, path_buf, PATH_MAX);
 	if (IS_ERR(path)) {
 		kfree(path_buf);
 		return 0;
 	}
-	
+
 	/* Check against escape patterns */
 	for (i = 0; escape_patterns[i]; i++) {
 		if (strstr(path, escape_patterns[i])) {
@@ -174,7 +174,7 @@ static int check_container_escape_attempt(struct file *file)
 			return -EPERM;
 		}
 	}
-	
+
 	/* Check for accessing host filesystem */
 	if (strncmp(path, "/host", HOST_PATH_PREFIX_LEN) == 0 ||
 	    strncmp(path, "/var/lib/docker", DOCKER_LIB_PREFIX_LEN) == 0) {
@@ -182,7 +182,7 @@ static int check_container_escape_attempt(struct file *file)
 		security_audit_log("container_host_access", uid,
 				   "path=%s", path);
 	}
-	
+
 	kfree(path_buf);
 	return 0;
 }
@@ -197,7 +197,7 @@ static int restrict_container_capabilities(int cap)
 {
 	int i;
 	uid_t uid;
-	
+
 	/* Allow only safe capabilities in containers */
 	for (i = 0; dangerous_caps[i] != -1; i++) {
 		if (cap == dangerous_caps[i]) {
@@ -207,7 +207,7 @@ static int restrict_container_capabilities(int cap)
 			return -EPERM;
 		}
 	}
-	
+
 	return 0;
 }
 
@@ -225,11 +225,11 @@ static int check_container_mount(const char *dev_name, const struct path *path,
 {
 	struct hardening_container_ctx *container;
 	uid_t uid;
-	
+
 	container = current->security;
 	if (!container)
 		return 0;
-		
+
 	/* Deny dangerous mount types */
 	if (type && (strcmp(type, "proc") == 0 ||
 		     strcmp(type, "sysfs") == 0 ||
@@ -239,7 +239,7 @@ static int check_container_mount(const char *dev_name, const struct path *path,
 				   "type=%s denied", type);
 		return -EPERM;
 	}
-	
+
 	/* Check mount flags */
 	if (!(flags & MS_RDONLY) && (flags & MS_BIND)) {
 		/* Writable bind mount - potential escape vector */
@@ -247,7 +247,7 @@ static int check_container_mount(const char *dev_name, const struct path *path,
 		security_audit_log("container_writable_bind", uid,
 				   "flags=0x%lx", flags);
 	}
-	
+
 	/* Limit number of mounts per container */
 	if (++container->mount_count > CONTAINER_MAX_MOUNTS) {
 		uid = from_kuid(&init_user_ns, current_uid());
@@ -255,7 +255,7 @@ static int check_container_mount(const char *dev_name, const struct path *path,
 				   "count=%u", container->mount_count);
 		return -ENOSPC;
 	}
-	
+
 	return 0;
 }
 
@@ -272,18 +272,18 @@ static int container_network_isolation(struct socket *sock,
 	struct hardening_container_ctx *container;
 	struct sockaddr_in *addr_in;
 	uid_t uid;
-	
+
 	if (!hardening_is_container_process())
 		return 0;
-		
+
 	container = current->security;
 	if (!container || container->host_network)
 		return 0;
-		
+
 	/* Check for attempts to access host network */
 	if (address->sa_family == AF_INET) {
 		addr_in = (struct sockaddr_in *)address;
-		
+
 		/* Deny access to host loopback from container */
 		if (addr_in->sin_addr.s_addr == htonl(INADDR_LOOPBACK) &&
 		    ntohs(addr_in->sin_port) < PRIVILEGED_PORT_LIMIT) {
@@ -293,13 +293,13 @@ static int container_network_isolation(struct socket *sock,
 			return -EPERM;
 		}
 	}
-	
+
 	/* Check for container-to-container communication */
 	if (container->isolation_level >= CONTAINER_ISOLATION_STRICT) {
 		/* In strict mode, deny inter-container communication */
 		return check_inter_container_comm(sock, address);
 	}
-	
+
 	return 0;
 }
 
@@ -316,11 +316,11 @@ static int check_inter_container_comm(struct socket *sock,
 	/* In strict isolation mode, deny all inter-container communication */
 	/* This is a simplified implementation - real implementation would
 	 * check if source and destination are in different containers */
-	
+
 	uid_t uid = from_kuid(&init_user_ns, current_uid());
 	security_audit_log("container_comm_blocked", uid,
 			   "inter-container communication denied");
-	
+
 	return -EPERM;
 }
 
@@ -332,16 +332,16 @@ static int check_inter_container_comm(struct socket *sock,
 static bool detect_privileged_container(void)
 {
 	/* Check if all capabilities are present */
-	if (capable(CAP_SYS_ADMIN) && 
+	if (capable(CAP_SYS_ADMIN) &&
 	    capable(CAP_NET_ADMIN) &&
 	    capable(CAP_SYS_MODULE))
 		return true;
-		
+
 	/* Check if running as real root */
 	if (uid_eq(current_uid(), GLOBAL_ROOT_UID) &&
 	    uid_eq(current_euid(), GLOBAL_ROOT_UID))
 		return true;
-		
+
 	return false;
 }
 
@@ -442,7 +442,7 @@ static void enforce_container_seccomp(struct hardening_container_ctx *container)
 		__NR_tgkill, __NR_utimes,
 		-1
 	};
-	
+
 	container->syscall_whitelist = allowed_syscalls;
 	container->syscall_count = ARRAY_SIZE(allowed_syscalls) - 1;
 }
@@ -457,29 +457,29 @@ int hardening_init_container_context(struct hardening_task_ctx *ctx)
 {
 	struct hardening_container_ctx *container;
 	enum container_runtime_type runtime;
-	
+
 	if (!hardening_is_container_process())
 		return 0;
-		
+
 	container = kzalloc(sizeof(*container), GFP_KERNEL);
 	if (!container)
 		return -ENOMEM;
-		
+
 	/* Detect runtime */
 	runtime = detect_container_runtime(ctx);
 	container->runtime = runtime;
-	
+
 	/* Set container ID from cgroup */
 	container->container_id = task_cgroup_id(current);
-	
+
 	/* Detect privileged mode */
 	container->privileged = detect_privileged_container();
-	
+
 	/* Check namespace sharing with host */
 	container->host_network = (current->nsproxy->net_ns == &init_net);
 	container->host_pid = (task_active_pid_ns(current) == &init_pid_ns);
 	container->host_ipc = (current->nsproxy->ipc_ns == &init_ipc_ns);
-	
+
 	/* Set default isolation level */
 	if (container->privileged)
 		container->isolation_level = CONTAINER_ISOLATION_NONE;
@@ -487,24 +487,24 @@ int hardening_init_container_context(struct hardening_task_ctx *ctx)
 		container->isolation_level = CONTAINER_ISOLATION_STRICT;
 	else
 		container->isolation_level = CONTAINER_ISOLATION_NORMAL;
-		
+
 	/* Apply seccomp restrictions */
 	if (!container->privileged)
 		enforce_container_seccomp(container);
-		
+
 	/* Initialize resource limits */
 	container->memory_limit = 512 * 1024 * 1024; /* 512MB default */
 	container->cpu_quota = 50; /* 50% CPU default */
-	
+
 	ctx->container = container;
-	
+
 	/* Log container creation */
-	security_audit_log("container_created", 
+	security_audit_log("container_created",
 			   from_kuid(&init_user_ns, current_uid()),
 			   "runtime=%d privileged=%d isolation=%d",
 			   runtime, container->privileged,
 			   container->isolation_level);
-			   
+
 	return 0;
 }
 
@@ -516,7 +516,7 @@ int hardening_container_file_open(struct file *file)
 {
 	if (!hardening_is_container_process())
 		return 0;
-		
+
 	return check_container_escape_attempt(file);
 }
 
@@ -524,7 +524,7 @@ int hardening_container_capable(int cap)
 {
 	if (!hardening_is_container_process())
 		return 0;
-		
+
 	return restrict_container_capabilities(cap);
 }
 
@@ -533,7 +533,7 @@ int hardening_container_sb_mount(const char *dev_name, const struct path *path,
 {
 	if (!hardening_is_container_process())
 		return 0;
-		
+
 	return check_container_mount(dev_name, path, type, flags);
 }
 
@@ -542,7 +542,7 @@ int hardening_container_socket_connect(struct socket *sock,
 {
 	if (!hardening_is_container_process())
 		return 0;
-		
+
 	return container_network_isolation(sock, address);
 }
 
@@ -554,22 +554,22 @@ int hardening_docker_socket_access(struct file *file)
 	struct dentry *dentry;
 	char *path_buf, *path;
 	uid_t uid;
-	
+
 	if (!file || !file->f_path.dentry)
 		return 0;
-		
+
 	dentry = file->f_path.dentry;
-	
+
 	path_buf = kmalloc(PATH_MAX, GFP_KERNEL);
 	if (!path_buf)
 		return 0;
-		
+
 	path = dentry_path_raw(dentry, path_buf, PATH_MAX);
 	if (IS_ERR(path)) {
 		kfree(path_buf);
 		return 0;
 	}
-	
+
 	/* Check if accessing Docker socket */
 	if (strcmp(path, "/var/run/docker.sock") == 0) {
 		/* Only allow root and docker group */
@@ -581,13 +581,13 @@ int hardening_docker_socket_access(struct file *file)
 			kfree(path_buf);
 			return -EPERM;
 		}
-		
+
 		/* Log access for audit */
 		uid = from_kuid(&init_user_ns, current_uid());
 		security_audit_log("docker_socket_access", uid,
 				   "granted");
 	}
-	
+
 	kfree(path_buf);
 	return 0;
 }
