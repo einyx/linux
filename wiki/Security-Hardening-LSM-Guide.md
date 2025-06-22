@@ -237,8 +237,153 @@ hardening-notify
 # Do your normal tasks
 ```
 
+## Docker Security
+
+### Enable Docker protection
+
+```bash
+# Enable container security
+echo 1 > /sys/kernel/security/hardening/container_enabled
+
+# Set isolation level (0=none, 1=normal, 2=strict)
+echo 2 > /sys/kernel/security/hardening/container_isolation
+
+# Load Docker security policy
+cat /etc/hardening/docker-policy.yaml > /sys/kernel/security/hardening/policy
+```
+
+### Quick secure Docker containers
+
+```bash
+# Check if containers are detected
+hardening-status --containers
+
+# Monitor container security events
+hardening monitor --container
+
+# See container-specific blocks
+hardening explain --container-blocks
+```
+
+### Docker-specific commands
+
+```bash
+# List protected containers
+hardening docker list
+
+# Check container security status
+hardening docker status <container-id>
+
+# Apply stricter policy to a container
+hardening docker harden <container-name>
+
+# Monitor Docker socket access
+hardening docker socket-monitor
+```
+
+### Common Docker security tasks
+
+#### Secure a new container
+
+```bash
+# Launch with security defaults
+docker run --rm --cap-drop=ALL --cap-add=NET_BIND_SERVICE nginx
+
+# Check what was blocked
+hardening explain --container <container-id>
+```
+
+#### Debug container issues
+
+```bash
+# Container won't start?
+hardening docker debug <container-name>
+
+# See why operations are blocked
+dmesg | grep -E "container_|docker_"
+
+# Give temporary permissions
+hardening docker allow-temp <container-id> --cap SYS_ADMIN --duration 5m
+```
+
+#### Monitor container behavior
+
+```bash
+# Watch container in real-time
+hardening-dashboard --container-view
+
+# Export container security events
+hardening docker export-events --format json > container-audit.json
+```
+
+### Docker security profiles
+
+```bash
+# Use pre-made profiles
+hardening docker profile nginx --apply
+hardening docker profile postgres --apply
+hardening docker profile redis --apply
+
+# Create custom profile
+hardening-learn --container
+```
+
+### Container escape detection
+
+The LSM automatically detects and blocks:
+- Privileged container escapes
+- Docker socket manipulation
+- Dangerous mounts (proc, sysfs)
+- Kernel module loading
+- Raw device access
+
+See alerts:
+```bash
+hardening docker escape-attempts
+```
+
+### Docker Compose security
+
+```yaml
+# docker-compose.yml with security annotations
+services:
+  web:
+    image: nginx
+    # Hardening LSM annotations
+    labels:
+      hardening.profile: "web_server"
+      hardening.isolation: "strict"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+```
+
+Apply:
+```bash
+hardening docker-compose secure docker-compose.yml
+```
+
+### Kubernetes integration
+
+```yaml
+# Pod with hardening annotations
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    hardening.security/profile: "web"
+    hardening.security/isolation: "strict"
+spec:
+  containers:
+  - name: app
+    image: myapp:latest
+```
+
 ## Next Steps
 
 - Read `hardening --help` for all commands
 - Check `/etc/hardening-lsm/profiles/` for profile examples  
+- See `/etc/hardening/docker-policy.yaml` for Docker policies
+- Read the full Docker integration guide at `/docs/docker-integration.md`
 - Join the community for help and tips

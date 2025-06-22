@@ -43,6 +43,8 @@ make -j$(nproc)
 
 **Security**
 - [[Security Features]]
+- [[Security Hardening LSM Guide]]
+- [[Docker Container Security]]
 - [[Hardening Options]]
 - [[Threat Model]]
 

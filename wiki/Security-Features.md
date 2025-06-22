@@ -174,6 +174,34 @@ Biggest impacts:
 - Init-on-alloc: memory intensive applications
 - FORTIFY_SOURCE: negligible
 
+## Custom Security Modules
+
+### Hardening LSM
+
+A comprehensive Linux Security Module providing innovative security features:
+
+**Container Security**
+- Automatic Docker/container detection
+- Container escape prevention
+- Docker socket protection
+- Per-container security policies
+- Network isolation enforcement
+
+**Advanced Features**
+- ML-inspired behavioral anomaly detection
+- Temporal access control (time-based policies)
+- Resource usage fingerprinting
+- Process lineage tracking
+- Memory access pattern analysis
+
+**Performance Optimizations**
+- RCU-based policy lookups
+- Per-CPU statistics
+- Batched syscall analysis
+- Fast-path for common operations
+
+See [[Security Hardening LSM Guide]] and [[Docker Container Security]] for details.
+
 ## Threat Model
 
 Protects against:
@@ -183,6 +211,8 @@ Protects against:
 - ROP/JOP attacks  
 - Speculative execution attacks
 - Privilege escalation
+- Container escapes
+- Docker API abuse
 
 Does NOT protect against:
 - Hardware vulnerabilities (Rowhammer, etc)
