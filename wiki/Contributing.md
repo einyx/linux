@@ -1,316 +1,263 @@
-# Contributing Guide
+# Contributing
 
-Thank you for your interest in contributing to the Community Linux Kernel! We welcome contributions from everyone, regardless of experience level.
+We welcome contributions from everyone. This guide covers the process.
 
-## 🌟 Ways to Contribute
+## Before You Start
 
-### Code Contributions
-- 🐛 **Bug Fixes** - Fix reported issues
-- ✨ **Features** - Add new functionality
-- 🔒 **Security** - Enhance security features
-- ⚡ **Performance** - Optimize code
-- 🧹 **Cleanup** - Refactor and improve
+### Legal
 
-### Non-Code Contributions
-- 📚 **Documentation** - Improve guides and comments
-- 🧪 **Testing** - Test builds and report issues
-- 🎨 **UI/UX** - Improve tools and scripts
-- 🌍 **Translation** - Localize documentation
-- 💬 **Support** - Help other users
-
-## 🚀 Getting Started
-
-### 1. Set Up Development Environment
+All contributions must be signed-off:
 ```bash
-# Fork the repository on GitHub first
+git commit -s
+```
 
-# Clone your fork
+This indicates you agree to the [Developer Certificate of Origin](https://developercertificate.org/).
+
+### Setup
+
+Fork and clone:
+```bash
+# Fork on GitHub, then:
 git clone https://github.com/YOUR_USERNAME/linux.git
 cd linux
-
-# Add upstream remote
 git remote add upstream https://github.com/einyx/linux.git
-
-# Keep your fork updated
-git fetch upstream
-git checkout main
-git merge upstream/main
 ```
 
-### 2. Install Development Tools
+## Finding Work
+
+**Easy tasks**:
+- Look for `good first issue` label
+- Documentation fixes
+- Typos and cleanup
+- Build warnings
+
+**Regular work**:
+- Bug reports without fixes
+- TODO comments in code
+- Performance improvements
+- Security hardening
+
+**Major work**:
+- New drivers
+- Core changes
+- New features
+
+Always check if someone's already working on it.
+
+## Development Process
+
+### 1. Create branch
+
 ```bash
-# Debian/Ubuntu
-sudo apt-get update
-sudo apt-get install -y build-essential git bc kmod cpio flex bison \
-  libssl-dev libelf-dev libncurses-dev
-
-# Fedora/RHEL
-sudo dnf install -y gcc make git bc openssl-devel elfutils-libelf-devel \
-  ncurses-devel bison flex
-
-# Install additional tools
-pip install --user gitlint
+git checkout -b descriptive-branch-name
 ```
 
-### 3. Configure Git
-```bash
-# Set your identity
-git config --global user.name "Your Name"
-git config --global user.email "your.email@example.com"
+Branch names:
+- `fix/memory-leak-in-foo`
+- `feature/add-bar-driver`
+- `security/harden-baz`
 
-# Enable commit signing (recommended)
-git config --global commit.gpgSign true
-```
+### 2. Make changes
 
-## 📝 Contribution Process
-
-### 1. Find Something to Work On
-
-#### For Beginners
-- Look for issues labeled `good first issue`
-- Check `help wanted` labels
-- Review `documentation` issues
-- Start with small fixes
-
-#### For Experienced
-- Check the [roadmap](https://github.com/einyx/linux/projects)
-- Look for `enhancement` issues
-- Propose new features
-- Work on performance improvements
-
-### 2. Create a Branch
-```bash
-# Create feature branch
-git checkout -b feature/your-feature-name
-
-# Or for fixes
-git checkout -b fix/issue-description
-```
-
-Branch naming:
-- `feature/` - New features
-- `fix/` - Bug fixes
-- `security/` - Security improvements
-- `docs/` - Documentation
-- `test/` - Test improvements
-
-### 3. Make Your Changes
-
-#### Code Style
-Follow the [Linux kernel coding style](https://www.kernel.org/doc/html/latest/process/coding-style.html):
-
+Follow the kernel coding style:
 ```c
-/* Good */
-static int example_function(struct example *ex)
+static int example_function(void)
 {
-        if (!ex)
-                return -EINVAL;
+        struct example *e;
+        int ret;
 
-        ex->value = 42;
+        e = kmalloc(sizeof(*e), GFP_KERNEL);
+        if (!e)
+                return -ENOMEM;
+
+        ret = do_something(e);
+        if (ret)
+                goto err_free;
+
         return 0;
-}
 
-/* Bad */
-static int example_function(struct example* ex) {
-    if(!ex) return -EINVAL;
-    ex->value=42;
-    return 0;
+err_free:
+        kfree(e);
+        return ret;
 }
 ```
 
-#### Run Style Checks
+Key points:
+- 8-character tabs
+- 80 column limit (soft)
+- Braces on same line for functions
+- Space after keywords (if, for, while)
+- No space after function names
+
+Check your style:
 ```bash
-# Check your changes
 ./scripts/checkpatch.pl --git HEAD
-
-# Fix common issues
-./scripts/checkpatch.pl --fix-inplace
 ```
 
-### 4. Test Your Changes
+### 3. Test
 
-#### Basic Testing
+**Build test**:
 ```bash
-# Build test
-make defconfig
 make -j$(nproc)
-
-# Run specific tests
-make M=drivers/your_driver
-
-# Boot test (if applicable)
-qemu-system-x86_64 -kernel arch/x86/boot/bzImage
 ```
 
-#### Run CI Tests Locally
+**Boot test** (if applicable):
 ```bash
-# Security checks
-make C=2 CHECK="sparse -Wno-decl"
-
-# Static analysis
-cppcheck --enable=all kernel/your_file.c
+qemu-system-x86_64 -kernel arch/x86/boot/bzImage -append "console=ttyS0" -nographic
 ```
 
-### 5. Commit Your Changes
-
-#### Commit Message Format
-```
-subsystem: Brief description (max 72 chars)
-
-Detailed explanation of the change. Explain what the change
-does and why it's needed. Wrap at 72 characters.
-
-If fixing a bug, describe the bug and how this fixes it.
-If adding a feature, explain the use case.
-
-Fixes: #123
-Signed-off-by: Your Name <your.email@example.com>
-```
-
-#### Example Commits
+**Run specific tests**:
 ```bash
-# Good commit
-git commit -s -m "mm: fix memory leak in page allocation
-
-The page allocator was not freeing memory in error paths,
-causing a memory leak when allocation failed. This patch
-adds proper cleanup in all error paths.
-
-This was discovered during stress testing with low memory
-conditions where the system would eventually OOM.
-
-Fixes: #456
-Signed-off-by: Jane Doe <jane@example.com>"
-
-# Multiple commits for complex changes
-git add mm/page_alloc.c
-git commit -s -m "mm: refactor page allocation error handling"
-
-git add mm/debug.c
-git commit -s -m "mm: add debug output for allocation failures"
+# If you changed mm/
+make M=mm
+./tools/testing/selftests/mm/run_vmtests.sh
 ```
 
-### 6. Push and Create PR
+### 4. Commit
 
-```bash
-# Push to your fork
-git push origin feature/your-feature-name
+Write good commit messages:
 
-# Create PR via GitHub UI or CLI
-gh pr create --title "mm: fix memory leak in page allocation" \
-  --body "Description of changes..."
+```
+subsystem: Short description (50 chars max)
+
+Longer description explaining what this does and why.
+Wrap at 72 characters. Be specific about the problem
+being solved and how this fixes it.
+
+If this fixes a bug, describe the symptoms and root
+cause. Include relevant error messages.
+
+Link: https://lore.kernel.org/link-to-discussion
+Fixes: 123456789abc ("Previous commit this fixes")
+Reported-by: Someone <someone@example.com>
+Tested-by: Another <another@example.com>
+Signed-off-by: Your Name <you@example.com>
 ```
 
-## ✅ PR Checklist
-
-Before submitting:
-- [ ] Code follows kernel style guide
-- [ ] All commits are signed-off (`git commit -s`)
-- [ ] Tests pass locally
-- [ ] Documentation updated (if needed)
-- [ ] No merge commits (rebase instead)
-- [ ] PR description is clear
-- [ ] Linked to issue (if applicable)
-
-## 🤖 Automated Checks
-
-Your PR will trigger:
-1. **Style Check** - checkpatch.pl validation
-2. **Build Test** - Multiple architectures
-3. **Security Scan** - Static analysis
-4. **Test Suite** - Automated tests
-
-## 📋 Review Process
-
-### What to Expect
-1. Automated checks run first
-2. Maintainers review within 48h
-3. Address feedback promptly
-4. May need multiple iterations
-5. Merged after approval
-
-### Review Criteria
-- **Correctness** - Does it work?
-- **Style** - Follows conventions?
-- **Performance** - No regressions?
-- **Security** - Safe and secure?
-- **Documentation** - Well explained?
-
-## 🎓 Tips for Success
-
-### Do's ✅
-- Start small for first contribution
-- Ask questions if unsure
-- Test thoroughly
-- Be patient with reviews
-- Learn from feedback
-
-### Don'ts ❌
-- Don't submit huge PRs
-- Don't ignore CI failures
-- Don't take reviews personally
-- Don't skip documentation
-- Don't break existing code
-
-## 🛠️ Advanced Topics
-
-### Working with Patches
+Examples:
 ```bash
-# Create patch series
-git format-patch -3 --cover-letter
+git commit -s -m "mm: fix use-after-free in page allocator
 
-# Apply patches
-git am *.patch
+The page allocator could access freed memory when allocation
+failed and cleanup was performed. This was due to improper
+ordering of operations in the error path.
 
-# Send patches (if not using PRs)
-git send-email *.patch
-```
+Fix by ensuring the memory is removed from lists before
+freeing.
 
-### Rebasing
-```bash
-# Update your branch
-git fetch upstream
-git rebase upstream/main
+This was found by KASAN during stress testing:
+  BUG: KASAN: use-after-free in free_pages_prepare+0x...
 
-# Interactive rebase
-git rebase -i upstream/main
-```
-
-### Co-authoring
-```bash
-# Credit co-authors
-git commit -s -m "feature: add new driver
-
-Co-authored-by: Other Dev <other@example.com>
+Fixes: abcdef123456 (\"mm: optimize page allocation\")
 Signed-off-by: Your Name <you@example.com>"
 ```
 
-## 📚 Resources
+### 5. Submit
 
-### Documentation
-- [[Development-Workflow]] - Our git workflow
-- [[Coding-Standards]] - Detailed style guide
-- [[Testing]] - Comprehensive testing
-- [[Security-Contributing]] - Security patches
+Push and create PR:
+```bash
+git push origin your-branch
+# Create PR on GitHub
+```
 
-### External Links
-- [Kernel Newbies](https://kernelnewbies.org/)
-- [Linux Kernel Development](https://www.kernel.org/doc/html/latest/process/)
-- [Git Documentation](https://git-scm.com/doc)
+PR description should include:
+- What the change does
+- Why it's needed
+- How it was tested
+- Any risks or side effects
 
-## 🤝 Getting Help
+## Code Review
 
-- **Discord**: [Join our server](https://discord.gg/example)
-- **Discussions**: [GitHub Discussions](https://github.com/einyx/linux/discussions)
-- **Email**: kernel-help@example.com
+### What to expect
 
-## 🏆 Recognition
+- Automated checks run first (build, style, security)
+- Human review within 48-72 hours
+- May need several rounds of feedback
+- Be patient and responsive
 
-We value all contributions:
-- Contributors added to [CREDITS](../CREDITS)
-- Regular contributors get merge rights
-- Top contributors become maintainers
+### Common feedback
 
----
+**Style issues**: Fix with checkpatch
+**Missing error handling**: Always check return values
+**Memory leaks**: Ensure all allocations are freed
+**Locking issues**: Document lock ordering
+**Performance**: Provide benchmarks for optimizations
 
-**Thank you for contributing! Together we're building a better, more secure kernel. 🚀**
+### Addressing feedback
+
+```bash
+# Make requested changes
+git add -u
+git commit --amend  # If updating existing commit
+
+# Or add new commits
+git commit -s -m "address review feedback"
+
+# Force push
+git push -f origin your-branch
+```
+
+## Tips
+
+### DO:
+- Start small
+- One logical change per commit
+- Test thoroughly
+- Be responsive to feedback
+- Read surrounding code first
+
+### DON'T:
+- Mix unrelated changes
+- Break bisectability
+- Ignore CI failures
+- Take reviews personally
+- Submit untested code
+
+## Advanced Topics
+
+### Patch series
+
+For complex changes:
+```bash
+# Create series
+git format-patch -3 --cover-letter
+
+# Edit cover letter
+vim 0000-cover-letter.patch
+
+# Send (if using email workflow)
+git send-email *.patch
+```
+
+### Backporting
+
+For stable kernels:
+```bash
+# Cherry-pick to stable
+git checkout linux-6.1.y
+git cherry-pick -x <commit-sha>
+# Add "Cc: stable@vger.kernel.org" to commit
+```
+
+### Becoming a maintainer
+
+Regular contributors may be invited to become maintainers:
+- Consistent quality contributions
+- Good review feedback
+- Understanding of subsystem
+- Time to dedicate
+
+## Getting Help
+
+- **Questions**: [Discussions](https://github.com/einyx/linux/discussions)
+- **Real-time**: IRC #kernel-community on Libera
+- **Mentoring**: Ask in good first issue threads
+
+## Recognition
+
+All contributors are added to CREDITS file. Regular contributors may get:
+- Reviewer rights
+- Direct commit access
+- Maintainer status
+
+Thank you for contributing!
