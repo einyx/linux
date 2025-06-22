@@ -121,21 +121,47 @@ jobs:
   release:
     needs: [build-deb, build-rpm]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.ref == 'refs/heads/main'
     
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
     - name: Download all artifacts
       uses: actions/download-artifact@v4
     
     - name: Display structure of downloaded files
       run: ls -laR
     
+    - name: Get kernel version
+      id: kernel_version
+      run: |
+        echo "KERNEL_VERSION=$(make kernelversion 2>/dev/null || echo "6.16.0")" >> $GITHUB_OUTPUT
+        echo "SHORT_SHA=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+        echo "DATE=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+    
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
+        tag_name: v${{ steps.kernel_version.outputs.KERNEL_VERSION }}-${{ steps.kernel_version.outputs.DATE }}-${{ steps.kernel_version.outputs.SHORT_SHA }}
+        name: Linux Kernel ${{ steps.kernel_version.outputs.KERNEL_VERSION }} Build ${{ steps.kernel_version.outputs.DATE }}
+        body: |
+          Automated build of Linux kernel from commit ${{ github.sha }}
+          
+          ## Build Information
+          - **Kernel Version**: ${{ steps.kernel_version.outputs.KERNEL_VERSION }}
+          - **Commit**: ${{ github.sha }}
+          - **Date**: ${{ steps.kernel_version.outputs.DATE }}
+          
+          ## Artifacts
+          This release includes DEB and RPM packages for:
+          - AMD64/x86_64 architecture
+          - ARM64/aarch64 architecture
         files: |
           deb-packages-*/*.deb
           rpm-packages-*/*.rpm
         draft: false
-        prerelease: false
-        generate_release_notes: true
+        prerelease: true
+        generate_release_notes: false
