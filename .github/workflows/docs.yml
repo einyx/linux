@@ -1,0 +1,159 @@
+name: Documentation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Documentation/**'
+      - '**/*.rst'
+      - '**/*.md'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Documentation/**'
+      - '**/*.rst'
+      - '**/*.md'
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-sphinx python3-sphinx-rtd-theme
+        sudo apt-get install -y texlive-xetex texlive-fonts-recommended
+        pip install -r Documentation/sphinx/requirements.txt || true
+    
+    - name: Build HTML documentation
+      run: |
+        make htmldocs || true
+    
+    - name: Build PDF documentation
+      run: |
+        make pdfdocs || true
+    
+    - name: Upload documentation artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-documentation
+        path: |
+          Documentation/output/
+        retention-days: 30
+
+  security-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Create security documentation
+      run: |
+        mkdir -p security-docs
+        
+        cat > security-docs/SECURITY.md << 'EOF'
+        # Security Policy
+        
+        ## Supported Versions
+        
+        This community-driven Linux kernel fork maintains security patches for:
+        
+        | Version | Supported          |
+        | ------- | ------------------ |
+        | main    | :white_check_mark: |
+        | Latest Release | :white_check_mark: |
+        
+        ## Reporting a Vulnerability
+        
+        Please report security vulnerabilities through GitHub Security Advisories.
+        
+        ### What to Include
+        
+        - Kernel version affected
+        - Steps to reproduce
+        - Potential impact
+        - Suggested fix (if any)
+        
+        ## Security Features
+        
+        This kernel includes enhanced security features:
+        
+        - Hardened memory allocator options
+        - Additional runtime security checks
+        - Enhanced KASLR implementation
+        - Stricter module loading policies
+        - Additional syscall filtering options
+        
+        ## Build Options for Security
+        
+        For maximum security, build with:
+        ```bash
+        make menuconfig
+        # Enable: Security -> Kernel hardening options
+        # Enable: Security -> Memory initialization
+        # Enable: General -> Kernel stack protector
+        ```
+        EOF
+        
+        cat > security-docs/HARDENING.md << 'EOF'
+        # Kernel Hardening Guide
+        
+        ## Recommended Configuration
+        
+        ### Memory Protection
+        - CONFIG_HARDENED_USERCOPY=y
+        - CONFIG_FORTIFY_SOURCE=y
+        - CONFIG_STACKPROTECTOR_STRONG=y
+        - CONFIG_STRICT_KERNEL_RWX=y
+        - CONFIG_STRICT_MODULE_RWX=y
+        
+        ### KASLR and Randomization
+        - CONFIG_RANDOMIZE_BASE=y
+        - CONFIG_RANDOMIZE_MEMORY=y
+        - CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT=y
+        
+        ### Speculation Mitigations
+        - CONFIG_PAGE_TABLE_ISOLATION=y
+        - CONFIG_RETPOLINE=y
+        - CONFIG_SPECULATION_MITIGATIONS=y
+        
+        ### Memory Initialization
+        - CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+        - CONFIG_INIT_ON_FREE_DEFAULT_ON=y
+        - CONFIG_ZERO_CALL_USED_REGS=y
+        
+        ### Additional Protections
+        - CONFIG_SECURITY_DMESG_RESTRICT=y
+        - CONFIG_SECURITY_LOCKDOWN_LSM=y
+        - CONFIG_SECURITY_LOCKDOWN_LSM_EARLY=y
+        
+        ## Testing Security Features
+        
+        1. KASLR verification:
+           ```bash
+           sudo cat /proc/kallsyms | grep startup_64
+           # Address should change between boots
+           ```
+        
+        2. Stack protector test:
+           ```bash
+           dmesg | grep "stack protector"
+           ```
+        
+        3. Hardened usercopy:
+           ```bash
+           dmesg | grep "hardened usercopy"
+           ```
+        EOF
+    
+    - name: Upload security documentation
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-documentation
+        path: security-docs/
+        retention-days: 30

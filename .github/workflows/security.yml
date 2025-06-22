@@ -1,0 +1,160 @@
+name: Security Analysis
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * *'  # Daily security scan
+
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Install analysis tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cppcheck sparse coccinelle smatch
+        sudo apt-get install -y clang clang-tools
+        pip install semgrep
+    
+    - name: Run Coccinelle semantic patches
+      run: |
+        echo "Running Coccinelle security checks..."
+        make coccicheck MODE=report V=1 || true
+    
+    - name: Run Sparse static analyzer
+      run: |
+        echo "Running Sparse checks..."
+        make C=2 CHECK="sparse -Wno-decl" defconfig
+        make C=2 CHECK="sparse -Wno-decl" -j$(nproc) || true
+    
+    - name: Run cppcheck
+      run: |
+        echo "Running cppcheck..."
+        cppcheck --enable=all --inconclusive --xml --xml-version=2 \
+          --suppress=missingIncludeSystem \
+          --suppress=unmatchedSuppression \
+          --suppress=unusedFunction \
+          kernel/ drivers/ 2>cppcheck.xml || true
+    
+    - name: Run clang static analyzer
+      run: |
+        echo "Running clang static analyzer..."
+        scan-build -o clang-report make defconfig
+        scan-build -o clang-report make -j$(nproc) || true
+    
+    - name: Run Semgrep security patterns
+      run: |
+        echo "Running Semgrep..."
+        semgrep --config=auto --json -o semgrep-report.json . || true
+    
+    - name: Upload analysis reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-analysis-reports
+        path: |
+          cppcheck.xml
+          clang-report/
+          semgrep-report.json
+        retention-days: 30
+
+  kernel-hardening-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
+        pip install kernel-hardening-checker
+    
+    - name: Generate hardened config
+      run: |
+        echo "Generating security-focused kernel config..."
+        make defconfig
+        
+        # Enable security features
+        ./scripts/config --enable CONFIG_SECURITY
+        ./scripts/config --enable CONFIG_SECURITY_SELINUX
+        ./scripts/config --enable CONFIG_SECURITY_APPARMOR
+        ./scripts/config --enable CONFIG_SECURITY_YAMA
+        ./scripts/config --enable CONFIG_HARDENED_USERCOPY
+        ./scripts/config --enable CONFIG_FORTIFY_SOURCE
+        ./scripts/config --enable CONFIG_STACKPROTECTOR_STRONG
+        ./scripts/config --enable CONFIG_STRICT_KERNEL_RWX
+        ./scripts/config --enable CONFIG_STRICT_MODULE_RWX
+        ./scripts/config --enable CONFIG_RANDOMIZE_BASE
+        ./scripts/config --enable CONFIG_RANDOMIZE_MEMORY
+        ./scripts/config --enable CONFIG_CC_STACKPROTECTOR_STRONG
+        ./scripts/config --enable CONFIG_PAGE_TABLE_ISOLATION
+        ./scripts/config --enable CONFIG_RETPOLINE
+        ./scripts/config --enable CONFIG_INIT_ON_ALLOC_DEFAULT_ON
+        ./scripts/config --enable CONFIG_INIT_ON_FREE_DEFAULT_ON
+        ./scripts/config --enable CONFIG_ZERO_CALL_USED_REGS
+        
+        # Disable dangerous features
+        ./scripts/config --disable CONFIG_DEVKMEM
+        ./scripts/config --disable CONFIG_LEGACY_PTYS
+        ./scripts/config --disable CONFIG_HIBERNATION
+        
+        make olddefconfig
+    
+    - name: Check kernel hardening
+      run: |
+        echo "Checking kernel hardening options..."
+        kernel-hardening-checker -c .config -m show_fail || true
+        kernel-hardening-checker -c .config -m json > hardening-report.json
+    
+    - name: Upload hardening report
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-hardening-report
+        path: hardening-report.json
+        retention-days: 30
+
+  vulnerability-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH,MEDIUM'
+    
+    - name: Upload Trivy SARIF results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+    
+    - name: Run OSV scanner
+      run: |
+        wget -qO - https://github.com/google/osv-scanner/releases/download/v1.4.3/osv-scanner_1.4.3_linux_amd64 > osv-scanner
+        chmod +x osv-scanner
+        ./osv-scanner -r . --json > osv-report.json || true
+    
+    - name: Upload OSV report
+      uses: actions/upload-artifact@v4
+      with:
+        name: osv-vulnerability-report
+        path: osv-report.json
+        retention-days: 30

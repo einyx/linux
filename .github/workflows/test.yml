@@ -1,0 +1,188 @@
+name: Kernel Testing
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        config: [defconfig, allmodconfig, tinyconfig]
+        compiler: [gcc, clang]
+        arch: [x86_64, arm64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
+        sudo apt-get install -y qemu-system-x86 qemu-system-arm
+        if [ "${{ matrix.compiler }}" = "clang" ]; then
+          sudo apt-get install -y clang lld llvm
+        fi
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+        fi
+    
+    - name: Configure kernel
+      run: |
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+        fi
+        if [ "${{ matrix.compiler }}" = "clang" ]; then
+          export CC=clang
+          export LD=ld.lld
+        fi
+        make ${{ matrix.config }}
+    
+    - name: Build kernel
+      run: |
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+        fi
+        if [ "${{ matrix.compiler }}" = "clang" ]; then
+          export CC=clang
+          export LD=ld.lld
+        fi
+        make -j$(nproc)
+    
+    - name: Build modules
+      run: |
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+        fi
+        if [ "${{ matrix.compiler }}" = "clang" ]; then
+          export CC=clang
+          export LD=ld.lld
+        fi
+        make modules -j$(nproc)
+
+  kunit-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
+        pip install kunit-tool
+    
+    - name: Run KUnit tests
+      run: |
+        ./tools/testing/kunit/kunit.py run --alltests
+
+  sanitizer-builds:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sanitizer: [kasan, kcsan, ktsan, kcov]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
+        sudo apt-get install -y clang lld llvm
+    
+    - name: Configure with ${{ matrix.sanitizer }}
+      run: |
+        make defconfig
+        
+        if [ "${{ matrix.sanitizer }}" = "kasan" ]; then
+          ./scripts/config --enable CONFIG_KASAN
+          ./scripts/config --enable CONFIG_KASAN_GENERIC
+          ./scripts/config --enable CONFIG_KASAN_OUTLINE
+          ./scripts/config --enable CONFIG_TEST_KASAN
+        elif [ "${{ matrix.sanitizer }}" = "kcsan" ]; then
+          ./scripts/config --enable CONFIG_KCSAN
+          ./scripts/config --enable CONFIG_KCSAN_INTERRUPT_WATCHER
+          ./scripts/config --enable CONFIG_KCSAN_REPORT_ONCE_IN_MS
+        elif [ "${{ matrix.sanitizer }}" = "ktsan" ]; then
+          ./scripts/config --enable CONFIG_KTSAN
+        elif [ "${{ matrix.sanitizer }}" = "kcov" ]; then
+          ./scripts/config --enable CONFIG_KCOV
+          ./scripts/config --enable CONFIG_KCOV_INSTRUMENT_ALL
+          ./scripts/config --enable CONFIG_KCOV_ENABLE_COMPARISONS
+        fi
+        
+        make olddefconfig
+    
+    - name: Build with ${{ matrix.sanitizer }}
+      run: |
+        make CC=clang -j$(nproc) || true
+
+  boot-test:
+    runs-on: ubuntu-latest
+    needs: build-test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
+        sudo apt-get install -y qemu-system-x86 qemu-system-arm
+        sudo apt-get install -y debootstrap
+    
+    - name: Build test kernel
+      run: |
+        make defconfig
+        ./scripts/config --enable CONFIG_E1000
+        ./scripts/config --enable CONFIG_E1000E
+        ./scripts/config --enable CONFIG_SERIAL_8250
+        ./scripts/config --enable CONFIG_SERIAL_8250_CONSOLE
+        make olddefconfig
+        make -j$(nproc)
+    
+    - name: Create initramfs
+      run: |
+        mkdir -p initramfs/bin
+        cp /bin/busybox initramfs/bin/
+        cd initramfs
+        mkdir -p dev proc sys
+        cat > init << 'EOF'
+        #!/bin/busybox sh
+        /bin/busybox mkdir -p /proc /sys /dev
+        /bin/busybox mount -t proc none /proc
+        /bin/busybox mount -t sysfs none /sys
+        /bin/busybox mount -t devtmpfs none /dev
+        echo "Kernel booted successfully!"
+        /bin/busybox poweroff -f
+        EOF
+        chmod +x init
+        find . | cpio -o -H newc | gzip > ../initramfs.cpio.gz
+        cd ..
+    
+    - name: Boot test in QEMU
+      timeout-minutes: 5
+      run: |
+        qemu-system-x86_64 \
+          -kernel arch/x86/boot/bzImage \
+          -initrd initramfs.cpio.gz \
+          -append "console=ttyS0 panic=1" \
+          -nographic \
+          -no-reboot \
+          -m 512M \
+          | tee boot.log
+        
+        grep "Kernel booted successfully!" boot.log

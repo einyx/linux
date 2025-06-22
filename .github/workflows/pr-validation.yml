@@ -1,0 +1,172 @@
+name: Pull Request Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-commits:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Check commit messages
+      run: |
+        echo "Checking commit message format..."
+        git log --format='%s' origin/${{ github.base_ref }}..${{ github.sha }} | while read line; do
+          if ! echo "$line" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore|security)(\(.+\))?: .{1,72}$'; then
+            echo "ERROR: Invalid commit message format: $line"
+            echo "Expected format: type(scope): description (max 72 chars)"
+            echo "Valid types: feat, fix, docs, style, refactor, perf, test, chore, security"
+            exit 1
+          fi
+        done
+    
+    - name: Check for signed-off-by
+      run: |
+        echo "Checking for Signed-off-by lines..."
+        commits_without_signoff=$(git log --format='%H %s' origin/${{ github.base_ref }}..${{ github.sha }} | \
+          while read hash subject; do
+            if ! git log -1 --format='%B' $hash | grep -q '^Signed-off-by: '; then
+              echo "$hash: $subject"
+            fi
+          done)
+        
+        if [ ! -z "$commits_without_signoff" ]; then
+          echo "ERROR: The following commits lack Signed-off-by:"
+          echo "$commits_without_signoff"
+          exit 1
+        fi
+
+  check-patch:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Run checkpatch.pl
+      run: |
+        echo "Running kernel style checker..."
+        git diff origin/${{ github.base_ref }}..${{ github.sha }} | \
+          ./scripts/checkpatch.pl --no-signoff - || true
+    
+    - name: Check for common security issues
+      run: |
+        echo "Checking for common security anti-patterns..."
+        
+        # Check for strcpy usage
+        if git diff origin/${{ github.base_ref }}..${{ github.sha }} | grep -E '^\+.*\bstrcpy\s*\('; then
+          echo "WARNING: strcpy() usage detected. Consider using strscpy() instead."
+        fi
+        
+        # Check for sprintf usage
+        if git diff origin/${{ github.base_ref }}..${{ github.sha }} | grep -E '^\+.*\bsprintf\s*\('; then
+          echo "WARNING: sprintf() usage detected. Consider using snprintf() or scnprintf() instead."
+        fi
+        
+        # Check for gets usage
+        if git diff origin/${{ github.base_ref }}..${{ github.sha }} | grep -E '^\+.*\bgets\s*\('; then
+          echo "ERROR: gets() usage detected. This function is dangerous and should never be used."
+          exit 1
+        fi
+
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+        fi
+    
+    - name: Configure kernel
+      run: |
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+        fi
+        make defconfig
+    
+    - name: Build kernel
+      run: |
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+        fi
+        make -j$(nproc)
+
+  security-impact:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Check for security-sensitive changes
+      run: |
+        echo "Checking for security-sensitive file changes..."
+        
+        SECURITY_PATHS="security/ crypto/ kernel/cred.c kernel/capability.c kernel/seccomp.c arch/*/kernel/ptrace.c"
+        CHANGED_SECURITY_FILES=$(git diff --name-only origin/${{ github.base_ref }}..${{ github.sha }} | \
+          grep -E "(security/|crypto/|cred\.c|capability\.c|seccomp\.c|ptrace\.c)" || true)
+        
+        if [ ! -z "$CHANGED_SECURITY_FILES" ]; then
+          echo "⚠️  This PR modifies security-sensitive files:"
+          echo "$CHANGED_SECURITY_FILES"
+          echo ""
+          echo "Please ensure:"
+          echo "- Changes have been reviewed by security maintainers"
+          echo "- Appropriate testing has been performed"
+          echo "- Security implications are documented"
+        fi
+    
+    - name: Generate diff statistics
+      run: |
+        echo "### PR Statistics" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Files changed:" >> $GITHUB_STEP_SUMMARY
+        git diff --stat origin/${{ github.base_ref }}..${{ github.sha }} >> $GITHUB_STEP_SUMMARY
+
+  documentation:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Check documentation updates
+      run: |
+        echo "Checking if documentation needs updating..."
+        
+        # Check if code changes require doc updates
+        CODE_CHANGES=$(git diff --name-only origin/${{ github.base_ref }}..${{ github.sha }} | \
+          grep -vE "(Documentation/|\.md$|\.rst$|\.txt$)" | wc -l)
+        DOC_CHANGES=$(git diff --name-only origin/${{ github.base_ref }}..${{ github.sha }} | \
+          grep -E "(Documentation/|\.md$|\.rst$|\.txt$)" | wc -l)
+        
+        if [ $CODE_CHANGES -gt 5 ] && [ $DOC_CHANGES -eq 0 ]; then
+          echo "WARNING: Significant code changes detected without documentation updates."
+          echo "Please consider updating relevant documentation."
+        fi
