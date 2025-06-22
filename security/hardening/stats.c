@@ -23,7 +23,16 @@ struct hardening_stats hardening_global_stats = {
 	.memory_anomalies = ATOMIC64_INIT(0),
 };
 
-/* Show detailed statistics */
+/**
+ * hardening_show_stats - Display security module statistics
+ * @m: seq_file to write output to
+ * @v: private data (unused)
+ *
+ * Outputs detailed statistics about security checks, anomalies detected,
+ * and performance metrics to the provided seq_file.
+ *
+ * Return: 0 on success
+ */
 int hardening_show_stats(struct seq_file *m, void *v)
 {
 	u64 total_checks = atomic64_read(&hardening_global_stats.total_checks);
@@ -65,7 +74,12 @@ int hardening_show_stats(struct seq_file *m, void *v)
 	return 0;
 }
 
-/* Reset statistics */
+/**
+ * hardening_reset_stats - Reset all security module statistics
+ *
+ * Resets all statistical counters to zero. This is typically used
+ * for testing or when starting a new monitoring period.
+ */
 void hardening_reset_stats(void)
 {
 	atomic64_set(&hardening_global_stats.total_syscalls, 0);
@@ -83,7 +97,13 @@ void hardening_reset_stats(void)
 	pr_info("hardening: statistics reset\n");
 }
 
-/* Update check timing statistics */
+/**
+ * hardening_update_check_time - Update security check timing statistics
+ * @start_ns: Start time of the check in nanoseconds
+ *
+ * Updates the total check count and cumulative check time for
+ * performance monitoring purposes.
+ */
 void hardening_update_check_time(u64 start_ns)
 {
 	u64 duration = ktime_get_ns() - start_ns;

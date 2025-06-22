@@ -37,6 +37,15 @@ static int get_current_hour_and_day(u8 *hour, u8 *day)
 	return 0;
 }
 
+/**
+ * hardening_check_time_access - Check if access is allowed at current time
+ * @ctx: task security context
+ *
+ * Evaluates temporal access rules to determine if the process is
+ * allowed to operate at the current time of day and day of week.
+ *
+ * Return: 0 if allowed, -EPERM if denied
+ */
 int hardening_check_time_access(struct hardening_task_ctx *ctx)
 {
 	struct hardening_time_rule *rule;
@@ -86,6 +95,16 @@ int hardening_check_time_access(struct hardening_task_ctx *ctx)
 	return 0;
 }
 
+/**
+ * hardening_add_time_rule - Add a temporal access rule to a task
+ * @ctx: task security context
+ * @new_rule: time rule to add
+ *
+ * Adds a new temporal access rule that restricts when the process
+ * can perform security-sensitive operations.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 int hardening_add_time_rule(struct hardening_task_ctx *ctx,
 			    struct hardening_time_rule *new_rule)
 {

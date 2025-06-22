@@ -37,7 +37,15 @@ static u32 calculate_transition_hash(u32 from, u32 to)
 	return jhash_1word(combined, 0) & (PATTERN_HASH_SIZE - 1);
 }
 
-/* Calculate Shannon entropy of syscall distribution */
+/**
+ * hardening_calculate_entropy - Calculate Shannon entropy of syscall distribution
+ * @behavior: behavior profile to analyze
+ *
+ * Calculates the Shannon entropy of the syscall frequency distribution
+ * to measure randomness/unpredictability of process behavior.
+ *
+ * Return: Calculated entropy value
+ */
 int hardening_calculate_entropy(struct hardening_behavior_profile *behavior)
 {
 	u32 total = 0;
@@ -69,7 +77,17 @@ int hardening_calculate_entropy(struct hardening_behavior_profile *behavior)
 	return entropy;
 }
 
-/* Update Markov chain with syscall transition */
+/**
+ * hardening_update_markov_chain - Update Markov chain with syscall transition
+ * @behavior: behavior profile to update
+ * @from: source syscall number
+ * @to: destination syscall number
+ *
+ * Records a syscall transition in the Markov chain model to track
+ * common sequences and detect anomalous behavior patterns.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 int hardening_update_markov_chain(struct hardening_behavior_profile *behavior,
 				  u32 from, u32 to)
 {
