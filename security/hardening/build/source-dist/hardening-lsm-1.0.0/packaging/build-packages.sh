@@ -3,6 +3,14 @@
 
 set -e
 
+# Support CI environment
+if [ -n "$CI" ]; then
+    echo "Running in CI environment"
+    # Disable interactive prompts
+    export DEBIAN_FRONTEND=noninteractive
+    export ASSUME_ALWAYS_YES=1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"

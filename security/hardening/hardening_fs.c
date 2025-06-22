@@ -221,11 +221,16 @@ static const struct file_operations hardening_policy_fops = {
 
 int hardening_init_securityfs(void)
 {
+	pr_info("hardening: initializing securityfs interface\n");
+	
 	hardening_dir = securityfs_create_dir("hardening", NULL);
 	if (IS_ERR(hardening_dir)) {
-		pr_err("hardening: failed to create securityfs directory\n");
+		pr_err("hardening: failed to create securityfs directory (err=%ld)\n", 
+		       PTR_ERR(hardening_dir));
 		return PTR_ERR(hardening_dir);
 	}
+	
+	pr_info("hardening: created securityfs directory successfully\n");
 	
 	status_file = securityfs_create_file("status", 0444,
 					     hardening_dir, NULL,
@@ -251,6 +256,7 @@ int hardening_init_securityfs(void)
 		goto err;
 	}
 	
+	pr_info("hardening: securityfs interface initialized successfully\n");
 	return 0;
 	
 err:

@@ -431,10 +431,20 @@ static int __init hardening_init(void)
 			   &hardening_lsmid);
 	
 	hardening_init_sysctl();
+
+	pr_info("Security Hardening Module initialized\n");
+	return 0;
+}
+
+static int __init hardening_fs_init(void)
+{
+	pr_info("hardening: late init starting\n");
 	
 #ifdef CONFIG_SECURITYFS
 	if (hardening_init_securityfs() < 0)
 		pr_warn("hardening: failed to initialize securityfs\n");
+	else
+		pr_info("hardening: securityfs initialized\n");
 #endif
 
 #ifdef CONFIG_SECURITY_HARDENING_SYSCALL_FILTER
@@ -442,9 +452,11 @@ static int __init hardening_init(void)
 		pr_warn("hardening: failed to initialize syscall filter\n");
 #endif
 
-	pr_info("Security Hardening Module initialized\n");
+	pr_info("hardening: late init completed\n");
 	return 0;
 }
+
+late_initcall(hardening_fs_init);
 
 DEFINE_LSM(hardening) = {
 	.name = "hardening",
