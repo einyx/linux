@@ -18,6 +18,13 @@
 #include <linux/fs_struct.h>
 #include <linux/dcache.h>
 #include <linux/path.h>
+#include <linux/sched.h>
+#include <linux/cred.h>
+#include <linux/uidgid.h>
+#include <linux/capability.h>
+#include <linux/in.h>
+#include <linux/syscalls.h>
+#include <asm/unistd.h>
 #include "../security_audit.h"
 #include "hardening.h"
 
@@ -55,21 +62,8 @@ static const int dangerous_caps[] = {
 	-1
 };
 
-/* Container runtime context */
-struct container_runtime {
-	enum {
-		RUNTIME_NONE = 0,
-		RUNTIME_DOCKER,
-		RUNTIME_CONTAINERD,
-		RUNTIME_PODMAN,
-		RUNTIME_K8S,
-	} type;
-	char name[64];
-	bool privileged;
-	bool host_network;
-	bool host_pid;
-	bool host_ipc;
-};
+/* Forward declarations */
+static int check_inter_container_comm(struct socket *sock, struct sockaddr *address);
 
 /**
  * detect_container_runtime - Detect which container runtime is in use
@@ -302,6 +296,27 @@ static int container_network_isolation(struct socket *sock,
 	}
 	
 	return 0;
+}
+
+/**
+ * check_inter_container_comm - Check inter-container communication
+ * @sock: socket
+ * @address: destination address
+ *
+ * Returns: 0 if allowed, -EPERM if denied
+ */
+static int check_inter_container_comm(struct socket *sock,
+				      struct sockaddr *address)
+{
+	/* In strict isolation mode, deny all inter-container communication */
+	/* This is a simplified implementation - real implementation would
+	 * check if source and destination are in different containers */
+	
+	uid_t uid = from_kuid(&init_user_ns, current_uid());
+	security_audit_log("container_comm_blocked", uid,
+			   "inter-container communication denied");
+	
+	return -EPERM;
 }
 
 /**
