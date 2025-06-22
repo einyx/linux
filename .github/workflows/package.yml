@@ -59,14 +59,18 @@ jobs:
         retention-days: 7
 
   build-rpm:
-    runs-on: ubuntu-latest
-    container:
-      image: fedora:latest
+    runs-on: self-hosted
     strategy:
       matrix:
         arch: [x86_64, aarch64]
     
     steps:
+    - name: Setup runner directories
+      run: |
+        sudo mkdir -p /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
+        sudo chmod 777 /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
+        sudo chown -R $USER:$USER /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work || true
+    
     - name: Checkout code
       uses: actions/checkout@v4
       with:
@@ -74,12 +78,35 @@ jobs:
     
     - name: Install dependencies
       run: |
-        dnf install -y git
-        dnf install -y rpm-build make gcc bc openssl-devel elfutils-libelf-devel
-        dnf install -y bison flex perl-devel perl-generators hostname
-        dnf install -y rsync tar findutils
-        if [ "${{ matrix.arch }}" = "aarch64" ]; then
-          dnf install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+        # Check if we're on Fedora/RHEL or Ubuntu/Debian
+        if command -v dnf >/dev/null 2>&1; then
+          sudo dnf install -y git
+          sudo dnf install -y rpm-build make gcc bc openssl-devel elfutils-libelf-devel
+          sudo dnf install -y bison flex perl-devel perl-generators hostname
+          sudo dnf install -y rsync tar findutils python3 dwarves
+          sudo dnf install -y elfutils-devel pahole
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            sudo dnf install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          fi
+        elif command -v yum >/dev/null 2>&1; then
+          sudo yum install -y git
+          sudo yum install -y rpm-build make gcc bc openssl-devel elfutils-libelf-devel
+          sudo yum install -y bison flex perl-devel hostname
+          sudo yum install -y rsync tar findutils python3
+          sudo yum install -y elfutils-devel
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            sudo yum install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu || true
+          fi
+        else
+          # Assume Ubuntu/Debian
+          sudo apt-get update
+          sudo apt-get install -y git build-essential
+          sudo apt-get install -y rpm alien bc openssl libssl-dev libelf-dev
+          sudo apt-get install -y bison flex perl hostname
+          sudo apt-get install -y rsync tar findutils python3 dwarves
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          fi
         fi
     
     - name: Configure git safe directory
@@ -96,13 +123,32 @@ jobs:
           git commit -m "Initial commit for RPM build"
         fi
     
+    - name: Setup build environment
+      run: |
+        # Check available disk space
+        df -h
+        # Check available memory
+        free -h
+        # Create RPM build directory structure
+        mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+    
     - name: Configure kernel
       run: |
         if [ "${{ matrix.arch }}" = "aarch64" ]; then
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
         fi
+        # Clean any previous build artifacts
+        make mrproper || true
         make defconfig
+        # Enable necessary options for packaging
+        scripts/config --enable CONFIG_LOCALVERSION_AUTO
+        scripts/config --disable CONFIG_DEBUG_INFO_BTF
+        scripts/config --disable CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
+        scripts/config --disable CONFIG_DEBUG_INFO_DWARF4
+        scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
+        scripts/config --set-str CONFIG_LOCALVERSION ""
+        make olddefconfig
     
     - name: Build kernel
       run: |
@@ -110,7 +156,20 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
         fi
-        make -j$(nproc) rpm-pkg RPMOPTS="--nodeps"
+        # Limit parallel jobs to avoid resource exhaustion
+        JOBS=$(nproc)
+        if [ $JOBS -gt 4 ]; then
+          JOBS=4
+        fi
+        echo "Building with $JOBS jobs"
+        
+        # Set up build environment
+        export KBUILD_BUILD_TIMESTAMP="$(date -u)"
+        export KBUILD_BUILD_HOST="github-actions"
+        export KBUILD_BUILD_USER="runner"
+        
+        # Build the RPM package with verbose output
+        make -j$JOBS V=1 rpm-pkg RPMOPTS="--nodeps --define '_topdir $(pwd)/rpmbuild'"
     
     - name: Upload RPM packages
       uses: actions/upload-artifact@v4
@@ -121,7 +180,7 @@ jobs:
 
   release:
     needs: [build-deb, build-rpm]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: github.ref == 'refs/heads/main'
     
     steps:
