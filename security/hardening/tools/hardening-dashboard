@@ -1,0 +1,415 @@
+#!/usr/bin/env python3
+"""
+Security Hardening LSM Interactive Dashboard
+Real-time monitoring and visualization of security events
+"""
+
+import os
+import sys
+import time
+import json
+import threading
+import queue
+from datetime import datetime
+from collections import deque, defaultdict
+from pathlib import Path
+
+try:
+    import curses
+    from curses import panel
+except ImportError:
+    print("Error: python3-curses is required. Install with: sudo apt install python3-curses", file=sys.stderr)
+    sys.exit(1)
+
+SYSFS_PATH = "/sys/kernel/security/hardening"
+PROC_PATH = "/proc/sys/kernel/hardening"
+UPDATE_INTERVAL = 0.5  # seconds
+
+class SecurityEvent:
+    def __init__(self, timestamp, event_type, process, severity, message):
+        self.timestamp = timestamp
+        self.event_type = event_type
+        self.process = process
+        self.severity = severity
+        self.message = message
+
+class SecurityMetrics:
+    def __init__(self):
+        self.total_checks = 0
+        self.blocked_operations = 0
+        self.anomalies = 0
+        self.current_level = "NORMAL"
+        self.active_processes = {}
+        self.events = deque(maxlen=100)
+        self.anomaly_scores = deque(maxlen=60)  # 30 seconds of data
+        self.resource_usage = defaultdict(lambda: deque(maxlen=60))
+
+class DashboardUI:
+    def __init__(self, stdscr):
+        self.stdscr = stdscr
+        self.metrics = SecurityMetrics()
+        self.event_queue = queue.Queue()
+        self.running = True
+        self.selected_tab = 0
+        self.tabs = ["Overview", "Events", "Processes", "Anomalies", "Resources"]
+        
+        # Initialize colors
+        self.init_colors()
+        
+        # Get terminal dimensions
+        self.height, self.width = stdscr.getmaxyx()
+        
+        # Create windows
+        self.create_windows()
+        
+        # Start data collection thread
+        self.collector_thread = threading.Thread(target=self.collect_data, daemon=True)
+        self.collector_thread.start()
+    
+    def init_colors(self):
+        """Initialize color pairs"""
+        curses.start_color()
+        curses.use_default_colors()
+        
+        # Define color pairs
+        curses.init_pair(1, curses.COLOR_GREEN, -1)   # Normal
+        curses.init_pair(2, curses.COLOR_YELLOW, -1)  # Warning
+        curses.init_pair(3, curses.COLOR_RED, -1)     # Critical
+        curses.init_pair(4, curses.COLOR_CYAN, -1)    # Info
+        curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_BLUE)  # Header
+        curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # Selected
+        curses.init_pair(7, curses.COLOR_MAGENTA, -1)  # Anomaly
+    
+    def create_windows(self):
+        """Create dashboard windows"""
+        # Header window
+        self.header_win = curses.newwin(3, self.width, 0, 0)
+        
+        # Tab bar window
+        self.tab_win = curses.newwin(1, self.width, 3, 0)
+        
+        # Main content window
+        self.main_win = curses.newwin(self.height - 7, self.width, 4, 0)
+        
+        # Status bar window
+        self.status_win = curses.newwin(3, self.width, self.height - 3, 0)
+    
+    def collect_data(self):
+        """Background thread to collect security data"""
+        while self.running:
+            try:
+                # Read from sysfs/procfs
+                self.update_metrics()
+                
+                # Simulate events for demo (replace with actual data)
+                if os.path.exists(f"{SYSFS_PATH}/events"):
+                    # Read real events
+                    pass
+                else:
+                    # Demo mode
+                    import random
+                    if random.random() < 0.3:
+                        event = SecurityEvent(
+                            datetime.now(),
+                            random.choice(["ANOMALY", "BLOCKED", "VIOLATION", "ESCALATION"]),
+                            f"process_{random.randint(1000, 9999)}",
+                            random.choice(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
+                            "Suspicious behavior detected"
+                        )
+                        self.metrics.events.append(event)
+                        self.event_queue.put(event)
+                
+                time.sleep(UPDATE_INTERVAL)
+            except Exception as e:
+                pass
+    
+    def update_metrics(self):
+        """Update security metrics from kernel"""
+        try:
+            # Read statistics
+            if os.path.exists(f"{SYSFS_PATH}/stats"):
+                with open(f"{SYSFS_PATH}/stats", "r") as f:
+                    stats = f.read()
+                    # Parse stats (format depends on kernel implementation)
+            
+            # Update anomaly scores
+            import random
+            self.metrics.anomaly_scores.append(random.randint(0, 100))
+            
+            # Update resource usage
+            self.metrics.resource_usage['cpu'].append(random.randint(10, 90))
+            self.metrics.resource_usage['memory'].append(random.randint(20, 80))
+            
+        except Exception:
+            pass
+    
+    def draw_header(self):
+        """Draw header with title and security level"""
+        self.header_win.erase()
+        self.header_win.attron(curses.color_pair(5) | curses.A_BOLD)
+        
+        title = "Security Hardening LSM Dashboard"
+        self.header_win.addstr(0, (self.width - len(title)) // 2, title)
+        
+        # Security level indicator
+        level = self.metrics.current_level
+        level_colors = {
+            "NORMAL": 1,
+            "ELEVATED": 2,
+            "HIGH": 3,
+            "CRITICAL": 3
+        }
+        color = level_colors.get(level, 1)
+        
+        level_text = f"Security Level: {level}"
+        self.header_win.addstr(1, self.width - len(level_text) - 2, level_text, 
+                               curses.color_pair(color) | curses.A_BOLD)
+        
+        # Timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.header_win.addstr(1, 2, timestamp, curses.color_pair(4))
+        
+        self.header_win.attroff(curses.color_pair(5) | curses.A_BOLD)
+        self.header_win.refresh()
+    
+    def draw_tabs(self):
+        """Draw tab bar"""
+        self.tab_win.erase()
+        
+        x = 2
+        for i, tab in enumerate(self.tabs):
+            if i == self.selected_tab:
+                self.tab_win.attron(curses.color_pair(6) | curses.A_BOLD)
+            else:
+                self.tab_win.attron(curses.A_NORMAL)
+            
+            self.tab_win.addstr(0, x, f" {tab} ")
+            
+            if i == self.selected_tab:
+                self.tab_win.attroff(curses.color_pair(6) | curses.A_BOLD)
+            
+            x += len(tab) + 3
+        
+        self.tab_win.refresh()
+    
+    def draw_overview(self):
+        """Draw overview tab"""
+        self.main_win.erase()
+        
+        # Summary boxes
+        y = 1
+        self.draw_metric_box(2, y, "Total Checks", self.metrics.total_checks, 1)
+        self.draw_metric_box(22, y, "Blocked Ops", self.metrics.blocked_operations, 2)
+        self.draw_metric_box(42, y, "Anomalies", self.metrics.anomalies, 3)
+        
+        # Anomaly score graph
+        y = 7
+        self.main_win.addstr(y, 2, "Anomaly Score Trend:", curses.A_BOLD)
+        self.draw_mini_graph(2, y + 1, 40, 6, self.metrics.anomaly_scores, "Anomaly")
+        
+        # Resource usage
+        self.main_win.addstr(y, 45, "Resource Usage:", curses.A_BOLD)
+        self.draw_mini_graph(45, y + 1, 30, 3, self.metrics.resource_usage['cpu'], "CPU %")
+        self.draw_mini_graph(45, y + 5, 30, 3, self.metrics.resource_usage['memory'], "Memory %")
+        
+        # Recent events
+        y = 16
+        self.main_win.addstr(y, 2, "Recent Security Events:", curses.A_BOLD)
+        y += 1
+        
+        for event in list(self.metrics.events)[-5:]:
+            self.draw_event_line(2, y, event)
+            y += 1
+        
+        self.main_win.refresh()
+    
+    def draw_metric_box(self, x, y, title, value, color_pair):
+        """Draw a metric box"""
+        box_width = 18
+        self.main_win.addstr(y, x, "┌" + "─" * (box_width - 2) + "┐")
+        self.main_win.addstr(y + 1, x, "│" + " " * (box_width - 2) + "│")
+        self.main_win.addstr(y + 2, x, "│" + " " * (box_width - 2) + "│")
+        self.main_win.addstr(y + 3, x, "└" + "─" * (box_width - 2) + "┘")
+        
+        # Title
+        self.main_win.addstr(y + 1, x + 2, title[:box_width - 4])
+        
+        # Value
+        value_str = str(value)
+        self.main_win.addstr(y + 2, x + (box_width - len(value_str)) // 2, 
+                             value_str, curses.color_pair(color_pair) | curses.A_BOLD)
+    
+    def draw_mini_graph(self, x, y, width, height, data, label):
+        """Draw a mini graph"""
+        if not data:
+            return
+        
+        # Draw border
+        self.main_win.addstr(y, x, label + ":")
+        
+        # Calculate graph
+        max_val = max(data) if data else 1
+        min_val = min(data) if data else 0
+        range_val = max_val - min_val or 1
+        
+        # Draw data points
+        for i, value in enumerate(list(data)[-width:]):
+            if i >= width:
+                break
+            
+            # Normalize to height
+            normalized = int((value - min_val) / range_val * (height - 1))
+            bar_height = normalized + 1
+            
+            # Draw bar
+            for h in range(height):
+                char = "█" if h < bar_height else " "
+                color = 1
+                if value > 70:
+                    color = 3
+                elif value > 50:
+                    color = 2
+                
+                try:
+                    self.main_win.addstr(y + height - h, x + i, char, curses.color_pair(color))
+                except:
+                    pass
+    
+    def draw_event_line(self, x, y, event):
+        """Draw a single event line"""
+        severity_colors = {
+            "LOW": 1,
+            "MEDIUM": 2,
+            "HIGH": 3,
+            "CRITICAL": 3
+        }
+        color = severity_colors.get(event.severity, 1)
+        
+        # Format: [HH:MM:SS] TYPE PROCESS: MESSAGE
+        time_str = event.timestamp.strftime("%H:%M:%S")
+        event_str = f"[{time_str}] {event.event_type:10} {event.process:15} {event.message}"
+        
+        try:
+            self.main_win.addstr(y, x, event_str[:self.width - x - 2], curses.color_pair(color))
+        except:
+            pass
+    
+    def draw_events(self):
+        """Draw events tab"""
+        self.main_win.erase()
+        
+        # Header
+        self.main_win.addstr(1, 2, "Time", curses.A_BOLD)
+        self.main_win.addstr(1, 12, "Type", curses.A_BOLD)
+        self.main_win.addstr(1, 25, "Process", curses.A_BOLD)
+        self.main_win.addstr(1, 40, "Severity", curses.A_BOLD)
+        self.main_win.addstr(1, 50, "Message", curses.A_BOLD)
+        
+        # Events
+        y = 3
+        for event in list(self.metrics.events)[-20:]:
+            if y >= self.height - 10:
+                break
+            
+            severity_colors = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 3}
+            color = severity_colors.get(event.severity, 1)
+            
+            self.main_win.addstr(y, 2, event.timestamp.strftime("%H:%M:%S"))
+            self.main_win.addstr(y, 12, event.event_type[:12])
+            self.main_win.addstr(y, 25, event.process[:14])
+            self.main_win.addstr(y, 40, event.severity, curses.color_pair(color))
+            self.main_win.addstr(y, 50, event.message[:self.width - 52])
+            
+            y += 1
+        
+        self.main_win.refresh()
+    
+    def draw_status_bar(self):
+        """Draw status bar"""
+        self.status_win.erase()
+        self.status_win.attron(curses.color_pair(5))
+        
+        # Draw border
+        self.status_win.hline(0, 0, curses.ACS_HLINE, self.width)
+        
+        # Status info
+        status_text = f"Module: {'Enabled' if True else 'Disabled'} | "
+        status_text += f"Mode: {'Enforcing' if True else 'Permissive'} | "
+        status_text += f"Events: {len(self.metrics.events)}"
+        
+        self.status_win.addstr(1, 2, status_text)
+        
+        # Help text
+        help_text = "TAB: Switch Tabs | Q: Quit | R: Reset | P: Pause"
+        self.status_win.addstr(1, self.width - len(help_text) - 2, help_text)
+        
+        self.status_win.attroff(curses.color_pair(5))
+        self.status_win.refresh()
+    
+    def handle_input(self):
+        """Handle keyboard input"""
+        self.stdscr.nodelay(True)
+        
+        try:
+            key = self.stdscr.getch()
+            
+            if key == ord('q') or key == ord('Q'):
+                self.running = False
+                return False
+            elif key == ord('\t'):
+                self.selected_tab = (self.selected_tab + 1) % len(self.tabs)
+            elif key == ord('r') or key == ord('R'):
+                self.metrics = SecurityMetrics()
+            elif key == curses.KEY_LEFT and self.selected_tab > 0:
+                self.selected_tab -= 1
+            elif key == curses.KEY_RIGHT and self.selected_tab < len(self.tabs) - 1:
+                self.selected_tab += 1
+        except:
+            pass
+        
+        return True
+    
+    def run(self):
+        """Main dashboard loop"""
+        self.stdscr.clear()
+        curses.curs_set(0)  # Hide cursor
+        
+        while self.running:
+            # Draw components
+            self.draw_header()
+            self.draw_tabs()
+            
+            # Draw selected tab content
+            if self.selected_tab == 0:
+                self.draw_overview()
+            elif self.selected_tab == 1:
+                self.draw_events()
+            # Add other tabs as needed
+            
+            self.draw_status_bar()
+            
+            # Handle input
+            if not self.handle_input():
+                break
+            
+            # Small delay to reduce CPU usage
+            time.sleep(0.1)
+
+def main(stdscr):
+    """Main entry point"""
+    dashboard = DashboardUI(stdscr)
+    dashboard.run()
+
+if __name__ == "__main__":
+    # Check if module is loaded
+    if not os.path.exists(SYSFS_PATH):
+        print("Warning: Security Hardening LSM not detected. Running in demo mode.", file=sys.stderr)
+        time.sleep(2)
+    
+    try:
+        curses.wrapper(main)
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)

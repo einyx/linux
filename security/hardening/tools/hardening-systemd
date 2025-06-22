@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+"""
+Security Hardening LSM SystemD Integration
+Manages per-service security profiles
+"""
+
+import os
+import sys
+import json
+import subprocess
+import argparse
+from pathlib import Path
+from datetime import datetime
+
+PROFILE_DIR = "/etc/hardening-lsm/profiles"
+SERVICE_MAP = "/etc/hardening-lsm/systemd-services.json"
+SYSTEMD_DIR = "/etc/systemd/system"
+DROPIN_DIR = "/etc/systemd/system/{}.d"
+
+class SystemDIntegration:
+    def __init__(self):
+        self.load_service_map()
+    
+    def load_service_map(self):
+        """Load service to profile mappings"""
+        self.service_map = {}
+        if os.path.exists(SERVICE_MAP):
+            try:
+                with open(SERVICE_MAP) as f:
+                    self.service_map = json.load(f)
+            except:
+                pass
+    
+    def save_service_map(self):
+        """Save service to profile mappings"""
+        os.makedirs(os.path.dirname(SERVICE_MAP), exist_ok=True)
+        with open(SERVICE_MAP, 'w') as f:
+            json.dump(self.service_map, f, indent=2)
+    
+    def check(self, service_name):
+        """Check if service has a security profile"""
+        # Clean service name
+        service = service_name.replace('.service', '')
+        
+        # Check if profile exists
+        if service in self.service_map:
+            profile = self.service_map[service]
+            profile_path = Path(PROFILE_DIR) / f"{profile}.json"
+            
+            if profile_path.exists():
+                print(f"Service '{service}' has profile '{profile}'")
+                return 0
+            else:
+                print(f"Warning: Profile '{profile}' not found for service '{service}'")
+                return 1
+        else:
+            # Try to auto-detect profile
+            common_services = {
+                'nginx': 'web_server',
+                'apache2': 'web_server',
+                'httpd': 'web_server',
+                'mysql': 'database',
+                'mariadb': 'database',
+                'postgresql': 'database',
+                'redis': 'database',
+                'docker': 'container_runtime',
+                'containerd': 'container_runtime',
+                'sshd': 'network_daemon'
+            }
+            
+            for svc, profile in common_services.items():
+                if svc in service:
+                    print(f"Auto-detected profile '{profile}' for service '{service}'")
+                    self.service_map[service] = profile
+                    self.save_service_map()
+                    return 0
+            
+            print(f"No profile found for service '{service}'")
+            return 1
+    
+    def apply(self, service_name):
+        """Apply security profile to service"""
+        service = service_name.replace('.service', '')
+        
+        # Get profile
+        if service not in self.service_map:
+            print(f"Error: No profile configured for service '{service}'")
+            print(f"Use: hardening-systemd configure {service} <profile>")
+            return 1
+        
+        profile = self.service_map[service]
+        print(f"Applying profile '{profile}' to service '{service}'")
+        
+        # Get service main PID
+        try:
+            result = subprocess.run(
+                ['systemctl', 'show', service, '--property=MainPID'],
+                capture_output=True, text=True
+            )
+            
+            if result.returncode == 0:
+                pid_line = result.stdout.strip()
+                if '=' in pid_line:
+                    pid = pid_line.split('=')[1]
+                    if pid and pid != '0':
+                        # Apply profile to PID
+                        subprocess.run([
+                            'hardening-ctl', 'apply-pid', pid, profile
+                        ])
+                        print(f"Profile applied to PID {pid}")
+                        return 0
+            
+            print(f"Service '{service}' not running, profile will apply on next start")
+            
+        except Exception as e:
+            print(f"Error applying profile: {e}")
+            return 1
+        
+        return 0
+    
+    def remove(self, service_name):
+        """Remove security profile from service"""
+        service = service_name.replace('.service', '')
+        
+        # Get service PID if running
+        try:
+            result = subprocess.run(
+                ['systemctl', 'show', service, '--property=MainPID'],
+                capture_output=True, text=True
+            )
+            
+            if result.returncode == 0:
+                pid_line = result.stdout.strip()
+                if '=' in pid_line:
+                    pid = pid_line.split('=')[1]
+                    if pid and pid != '0':
+                        subprocess.run(['hardening', 'reset', f'--pid={pid}'])
+                        print(f"Profile removed from PID {pid}")
+            
+        except:
+            pass
+        
+        return 0
+    
+    def configure(self, service_name, profile_name):
+        """Configure service to use a specific profile"""
+        service = service_name.replace('.service', '')
+        
+        # Verify profile exists
+        profile_path = Path(PROFILE_DIR) / f"{profile_name}.json"
+        if not profile_path.exists():
+            print(f"Error: Profile '{profile_name}' not found")
+            print(f"Available profiles:")
+            for p in Path(PROFILE_DIR).glob("*.json"):
+                print(f"  - {p.stem}")
+            return 1
+        
+        # Update mapping
+        self.service_map[service] = profile_name
+        self.save_service_map()
+        
+        # Create systemd drop-in
+        self.create_dropin(service, profile_name)
+        
+        print(f"Configured service '{service}' to use profile '{profile_name}'")
+        print(f"Run 'systemctl daemon-reload' to apply changes")
+        
+        return 0
+    
+    def create_dropin(self, service, profile):
+        """Create systemd drop-in for service"""
+        dropin_dir = Path(DROPIN_DIR.format(service))
+        dropin_dir.mkdir(parents=True, exist_ok=True)
+        
+        dropin_file = dropin_dir / "50-hardening-lsm.conf"
+        
+        content = f"""# Security Hardening LSM Configuration
+# Auto-generated on {datetime.now().isoformat()}
+
+[Service]
+# Apply security profile on service start
+ExecStartPost=/usr/bin/hardening-systemd apply %n
+
+# Remove profile on stop  
+ExecStopPost=/usr/bin/hardening-systemd remove %n
+
+# Environment for profile
+Environment="HARDENING_PROFILE={profile}"
+"""
+        
+        with open(dropin_file, 'w') as f:
+            f.write(content)
+        
+        print(f"Created drop-in: {dropin_file}")
+    
+    def enable(self, service_name):
+        """Enable hardening for a service"""
+        service = service_name.replace('.service', '')
+        
+        # Check if already configured
+        if service in self.service_map:
+            profile = self.service_map[service]
+        else:
+            # Auto-detect or ask
+            print(f"No profile configured for '{service}'")
+            profile = input("Enter profile name (or 'auto' for detection): ").strip()
+            
+            if profile == 'auto':
+                # Try auto-detection
+                self.check(service)
+                if service in self.service_map:
+                    profile = self.service_map[service]
+                else:
+                    profile = 'default'
+                    print(f"Using default profile")
+            
+            self.configure(service, profile)
+        
+        # Enable the hardening service
+        subprocess.run([
+            'systemctl', 'enable', f'hardening-lsm@{service}.service'
+        ])
+        
+        print(f"Hardening enabled for service '{service}'")
+        return 0
+    
+    def disable(self, service_name):
+        """Disable hardening for a service"""
+        service = service_name.replace('.service', '')
+        
+        # Disable the hardening service
+        subprocess.run([
+            'systemctl', 'disable', f'hardening-lsm@{service}.service'
+        ])
+        
+        # Remove drop-in if exists
+        dropin_file = Path(DROPIN_DIR.format(service)) / "50-hardening-lsm.conf"
+        if dropin_file.exists():
+            dropin_file.unlink()
+            print(f"Removed drop-in configuration")
+        
+        print(f"Hardening disabled for service '{service}'")
+        return 0
+    
+    def list(self):
+        """List services with hardening configured"""
+        print("Services with Security Hardening:")
+        print("-" * 50)
+        
+        if not self.service_map:
+            print("No services configured")
+            return 0
+        
+        for service, profile in sorted(self.service_map.items()):
+            # Check if service is running
+            result = subprocess.run(
+                ['systemctl', 'is-active', service],
+                capture_output=True, text=True
+            )
+            status = "active" if result.returncode == 0 else "inactive"
+            
+            # Check if hardening is enabled
+            result = subprocess.run(
+                ['systemctl', 'is-enabled', f'hardening-lsm@{service}.service'],
+                capture_output=True, text=True
+            )
+            hardening = "enabled" if result.returncode == 0 else "disabled"
+            
+            print(f"{service:20} Profile: {profile:15} Status: {status:8} Hardening: {hardening}")
+        
+        return 0
+    
+    def install(self):
+        """Install systemd integration"""
+        print("Installing SystemD integration...")
+        
+        # Copy service file
+        service_src = Path(__file__).parent.parent / "systemd" / "hardening-lsm@.service"
+        service_dst = Path("/etc/systemd/system/hardening-lsm@.service")
+        
+        if service_src.exists():
+            subprocess.run(['sudo', 'cp', str(service_src), str(service_dst)])
+            print(f"Installed: {service_dst}")
+        
+        # Create directories
+        os.makedirs(PROFILE_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(SERVICE_MAP), exist_ok=True)
+        
+        # Reload systemd
+        subprocess.run(['sudo', 'systemctl', 'daemon-reload'])
+        
+        print("Installation complete!")
+        print("\nUsage:")
+        print("  hardening-systemd enable nginx")
+        print("  hardening-systemd configure nginx web_server")
+        print("  hardening-systemd list")
+        
+        return 0
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Security Hardening LSM SystemD Integration"
+    )
+    
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    
+    # Commands used by systemd service
+    check_parser = subparsers.add_parser('check', help='Check if service has profile')
+    check_parser.add_argument('service', help='Service name')
+    
+    apply_parser = subparsers.add_parser('apply', help='Apply profile to service')
+    apply_parser.add_argument('service', help='Service name')
+    
+    remove_parser = subparsers.add_parser('remove', help='Remove profile from service')
+    remove_parser.add_argument('service', help='Service name')
+    
+    # User commands
+    configure_parser = subparsers.add_parser('configure', help='Configure service profile')
+    configure_parser.add_argument('service', help='Service name')
+    configure_parser.add_argument('profile', help='Profile name')
+    
+    enable_parser = subparsers.add_parser('enable', help='Enable hardening for service')
+    enable_parser.add_argument('service', help='Service name')
+    
+    disable_parser = subparsers.add_parser('disable', help='Disable hardening for service')
+    disable_parser.add_argument('service', help='Service name')
+    
+    subparsers.add_parser('list', help='List configured services')
+    subparsers.add_parser('install', help='Install systemd integration')
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        return 1
+    
+    integration = SystemDIntegration()
+    
+    if args.command == 'check':
+        return integration.check(args.service)
+    elif args.command == 'apply':
+        return integration.apply(args.service)
+    elif args.command == 'remove':
+        return integration.remove(args.service)
+    elif args.command == 'configure':
+        return integration.configure(args.service, args.profile)
+    elif args.command == 'enable':
+        return integration.enable(args.service)
+    elif args.command == 'disable':
+        return integration.disable(args.service)
+    elif args.command == 'list':
+        return integration.list()
+    elif args.command == 'install':
+        return integration.install()
+
+if __name__ == "__main__":
+    sys.exit(main())

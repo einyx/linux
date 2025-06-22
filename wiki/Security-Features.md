@@ -1,233 +1,208 @@
 # Security Features
 
-Our kernel includes comprehensive security enhancements inspired by grsecurity, KSPP (Kernel Self Protection Project), and modern security research.
+This kernel implements defense-in-depth security hardening inspired by grsecurity, KSPP, and modern research.
 
-## 🛡️ Security Overview
-
-### Defense in Depth
-We implement multiple layers of security:
-1. **Memory Protection** - Prevent exploitation
-2. **Access Controls** - Limit privileges  
-3. **Runtime Detection** - Catch attacks
-4. **Hardened Defaults** - Secure out-of-box
-
-### Threat Model
-Our hardening addresses:
-- Memory corruption exploits
-- Privilege escalation
-- Information disclosure
-- Kernel rootkits
-- Side-channel attacks
-
-## 🔒 Core Security Features
+## Enabled by Default
 
 ### Memory Protection
 
-#### Stack Protection
-```kconfig
-CONFIG_STACKPROTECTOR_STRONG=y
-CONFIG_GCC_PLUGIN_STACKLEAK=y
-CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT=y
-```
-- Detects stack buffer overflows
-- Clears kernel stack on syscall exit
-- Randomizes stack offset per syscall
+**CONFIG_HARDENED_USERCOPY=y**
+- Bounds checking on copy_to_user()/copy_from_user()
+- Prevents buffer overflows in user/kernel data transfers
+- ~1-3% performance impact
 
-#### Heap Protection
-```kconfig
-CONFIG_HARDENED_USERCOPY=y
-CONFIG_HARDENED_USERCOPY_FALLBACK=y
-CONFIG_SLAB_FREELIST_RANDOM=y
-CONFIG_SLAB_FREELIST_HARDENED=y
-```
-- Validates copy_to/from_user() bounds
-- Randomizes heap allocator freelists
-- Metadata corruption detection
+**CONFIG_FORTIFY_SOURCE=y**
+- Compile-time and runtime buffer overflow detection
+- Replaces unsafe string functions with bounds-checked versions
+- Minimal performance impact
 
-#### Memory Initialization
-```kconfig
-CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
-CONFIG_INIT_ON_FREE_DEFAULT_ON=y
-CONFIG_ZERO_CALL_USED_REGS=y
-```
-- Zeros memory on allocation
-- Clears memory on free
-- Zeros registers after function calls
+**CONFIG_STACKPROTECTOR_STRONG=y**
+- Stack canaries to detect buffer overflows
+- Compiler inserts checks in functions with stack buffers
+- ~1-2% performance overhead
 
-### Kernel Hardening
+**CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y**
+- Zero memory on allocation
+- Prevents information leaks
+- ~3-5% overhead (can be disabled with init_on_alloc=0)
 
-#### Code Protection
-```kconfig
-CONFIG_STRICT_KERNEL_RWX=y
-CONFIG_STRICT_MODULE_RWX=y
-CONFIG_FORTIFY_SOURCE=y
-```
-- Write-protect kernel code
-- No executable data pages
-- Compile-time bounds checking
+### Address Space Protection
 
-#### Control Flow
-```kconfig
-CONFIG_CFI_CLANG=y
-CONFIG_SHADOW_CALL_STACK=y
-CONFIG_RETPOLINE=y
-```
+**CONFIG_RANDOMIZE_BASE=y (KASLR)**
+- Randomizes kernel load address
+- Makes ROP/JOP attacks harder
+- No performance impact
+
+**CONFIG_RANDOMIZE_MEMORY=y**
+- Randomizes physical memory regions
+- Defeats hardcoded address attacks
+- No performance impact
+
+**CONFIG_STRICT_KERNEL_RWX=y**
+- Write-protect kernel code, read-only data
+- Prevents code modification attacks
+- No runtime overhead
+
+### Exploit Mitigation
+
+**CONFIG_PAGE_TABLE_ISOLATION=y**
+- Mitigates Meltdown (CVE-2017-5754)
+- Separate page tables for kernel/user
+- ~5-30% overhead depending on workload
+
+**CONFIG_RETPOLINE=y**
+- Mitigates Spectre v2 (CVE-2017-5715)
+- Indirect branch protection
+- ~0-10% overhead
+
+**CONFIG_SLS=y**
+- Straight-line speculation mitigation
+- Prevents speculative execution attacks
+- Minimal overhead
+
+## Optional Hardening
+
+Can be enabled via menuconfig or kernel parameters:
+
+### Sanitizers (Debug/Testing)
+
+**CONFIG_KASAN=y**
+- Dynamic memory error detector
+- Finds use-after-free, out-of-bounds
+- 3x memory overhead, 2-3x CPU overhead
+- Enable only for testing
+
+**CONFIG_KCSAN=y**
+- Data race detector
+- Finds concurrency bugs
+- Significant overhead
+- Testing only
+
+### Additional Mitigations
+
+**CONFIG_CFI_CLANG=y**
 - Control Flow Integrity
-- Shadow call stack (ARM64)
-- Spectre v2 mitigation
+- Prevents code-reuse attacks
+- ~3-5% overhead
+- Requires Clang compiler
 
-### KASLR & Randomization
+**CONFIG_SHADOW_CALL_STACK=y**
+- Separate shadow stack (ARM64 only)
+- Prevents ROP attacks
+- ~1% overhead
 
-#### Address Space
-```kconfig
-CONFIG_RANDOMIZE_BASE=y
-CONFIG_RANDOMIZE_MEMORY=y
-CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT=y
-```
-- Randomize kernel load address
-- Randomize memory regions
-- Per-syscall stack randomization
+**CONFIG_ZERO_CALL_USED_REGS=y**
+- Clear registers on function return
+- Reduces ROP gadgets
+- ~1% overhead
 
-### Attack Surface Reduction
+## Configuration
 
-#### Syscall Filtering
-```kconfig
-CONFIG_SECCOMP=y
-CONFIG_SECCOMP_FILTER=y
-```
-- BPF-based syscall filtering
-- Reduce available syscalls
+### Maximum Security
 
-#### Module Restrictions
-```kconfig
-CONFIG_SECURITY_LOADPIN=y
-CONFIG_MODULE_SIG=y
-CONFIG_MODULE_SIG_FORCE=y
-```
-- Restrict module loading sources
-- Require signed modules
-
-## 🚀 Advanced Features
-
-### Sanitizers (Debug Builds)
-
-#### KASAN - AddressSanitizer
 ```bash
-# Enable for memory error detection
-CONFIG_KASAN=y
-CONFIG_KASAN_GENERIC=y
-```
-Detects:
-- Out-of-bounds access
-- Use-after-free
-- Double-free
-
-#### KCSAN - Concurrency Sanitizer  
-```bash
-# Enable for race condition detection
-CONFIG_KCSAN=y
-```
-Detects:
-- Data races
-- Lock order violations
-
-### Security Modules
-
-#### Available LSMs
-- **SELinux** - Mandatory Access Control
-- **AppArmor** - Path-based MAC
-- **Yama** - Additional ptrace restrictions
-- **LoadPin** - Restrict kernel file reads
-- **Lockdown** - Restrict dangerous features
-
-## 📊 Performance Impact
-
-| Feature | Performance Impact | Security Benefit |
-|---------|-------------------|------------------|
-| KASLR | ~0% | High |
-| Stack Protector | 1-2% | High |
-| Hardened Usercopy | 1-3% | Medium |
-| FORTIFY_SOURCE | 0-1% | Medium |
-| Init on Alloc | 3-5% | High |
-| CFI | 2-5% | High |
-
-## 🔧 Configuration
-
-### Recommended Security Config
-```bash
-# Apply our security configuration
+# Apply all hardening options
 make defconfig
-./scripts/kconfig/merge_config.sh .config kernel/configs/hardening.config
+./scripts/kconfig/merge_config.sh .config \
+    kernel/configs/hardening.config \
+    kernel/configs/x86_64_defconfig
 
-# Or manually enable
-make menuconfig
-# Navigate to Security options → Kernel hardening options
+# Additional options
+scripts/config --enable CONFIG_INIT_ON_FREE_DEFAULT_ON
+scripts/config --enable CONFIG_SLAB_FREELIST_RANDOM
+scripts/config --enable CONFIG_SHUFFLE_PAGE_ALLOCATOR
+scripts/config --enable CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT
+
+make olddefconfig
 ```
 
-### Verification
+### Performance-Sensitive
+
 ```bash
-# Check enabled features
-./scripts/check-hardening.sh
-
-# Runtime verification
-dmesg | grep -E "hardened|protection|KASLR"
-cat /proc/sys/kernel/randomize_va_space
+# Disable expensive mitigations
+scripts/config --disable CONFIG_PAGE_TABLE_ISOLATION
+scripts/config --disable CONFIG_INIT_ON_ALLOC_DEFAULT_ON
+scripts/config --set-str CONFIG_INIT_ON_ALLOC_DEFAULT_ON ""
 ```
 
-## 🧪 Testing Security
+### Runtime Tuning
 
-### Basic Tests
+Boot parameters:
+```
+# Disable mitigations (unsafe!)
+mitigations=off
+
+# Selective disable
+init_on_alloc=0
+init_on_free=0
+pti=off
+spectre_v2=off
+
+# Enable additional hardening
+slub_debug=FZ
+```
+
+## Verification
+
+Check active mitigations:
 ```bash
-# Test KASLR
-sudo cat /proc/kallsyms | grep startup_64
-# Address should change on reboot
+# Compile-time features
+grep CONFIG_HARDENED /boot/config-$(uname -r)
 
-# Test stack protector
-dmesg | grep "stack protector"
+# Runtime status
+cat /sys/devices/system/cpu/vulnerabilities/*
+dmesg | grep -i "protection\|hardened"
 
-# Test hardened usercopy
-dmesg | grep "hardened usercopy"
+# Memory protections
+sudo cat /proc/sys/kernel/randomize_va_space  # Should be 2
 ```
 
-### Advanced Testing
-- [[Security-Testing]] - Comprehensive testing guide
-- [[Fuzzing]] - Kernel fuzzing setup
-- [[Exploit-Mitigation-Tests]] - Verify protections
+## Performance Impact
 
-## 🚨 Security Considerations
+Typical overhead with default hardening:
 
-### Trade-offs
-- Some features impact performance
-- Debugging may be harder with protections
-- Some legacy software may break
+| Workload | Overhead |
+|----------|----------|
+| Kernel compile | 3-5% |
+| Web server | 5-10% |
+| Database | 10-15% |
+| Gaming | 2-5% |
+| Desktop use | 1-3% |
 
-### Compatibility
-- Most userspace works unchanged
-- Some tools need CAP_SYS_RAWIO
-- Certain drivers may need updates
+Biggest impacts:
+- PTI (Page Table Isolation): syscall-heavy workloads
+- Init-on-alloc: memory intensive applications
+- FORTIFY_SOURCE: negligible
 
-## 📚 Further Reading
+## Threat Model
 
-### Internal Docs
-- [[Hardening-Guide]] - Detailed configuration
-- [[Security-Configuration]] - Production settings
-- [[Threat-Model]] - What we protect against
+Protects against:
+- Memory corruption (buffer overflows, UAF)
+- Information leaks
+- Code injection
+- ROP/JOP attacks  
+- Speculative execution attacks
+- Privilege escalation
 
-### External Resources
-- [KSPP Documentation](https://kernsec.org/wiki/index.php/Kernel_Self_Protection_Project)
-- [Grsecurity Features](https://grsecurity.net/features)
-- [Linux Security Modules](https://www.kernel.org/doc/html/latest/admin-guide/LSM/index.html)
+Does NOT protect against:
+- Hardware vulnerabilities (Rowhammer, etc)
+- Malicious kernel modules
+- Physical access attacks
+- Zero-day exploits in enabled code
 
-## 🤝 Contributing Security
+## Comparison with Stock Kernel
 
-We welcome security contributions:
-- Report vulnerabilities responsibly
-- Submit hardening patches
-- Improve security documentation
-- Test security features
+| Feature | Stock | Ours | grsecurity |
+|---------|-------|------|------------|
+| KASLR | Optional | Default | Enhanced |
+| Stack protector | Weak | Strong | Strong |
+| Hardened usercopy | No | Yes | Yes |
+| FORTIFY_SOURCE | Partial | Full | Full |
+| Memory init | No | Yes | Yes |
+| CFI | No | Optional | Yes |
 
-See [[Security-Contributing]] for guidelines.
+## Further Reading
 
----
-
-**Security is a journey, not a destination. Join us in making Linux more secure! 🔒**
+- [KSPP Recommended Settings](https://kernsec.org/wiki/index.php/Kernel_Self_Protection_Project/Recommended_Settings)
+- [Linux Kernel Defense Map](https://github.com/a13xp0p0v/linux-kernel-defence-map)
+- [Kernel Hardening Checker](https://github.com/a13xp0p0v/kconfig-hardened-check)

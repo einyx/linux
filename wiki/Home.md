@@ -1,91 +1,65 @@
-# Welcome to the Community Linux Kernel Wiki
+# Linux Community Kernel
 
-> **A security-focused, community-driven Linux kernel with modern CI/CD**
+A hardened Linux kernel fork with automated builds and security patches.
 
-## 🎯 Our Mission
+## Quick Start
 
-This project aims to democratize Linux kernel development by providing:
-- 🛡️ **Security-first approach** with automated hardening
-- 🤝 **Community-driven development** welcoming all contributors  
-- 🚀 **Modern CI/CD pipelines** for quality assurance
-- 📦 **Pre-built packages** for easy deployment
-- 📚 **Comprehensive documentation** for learning
+**Download**: [Latest Release](https://github.com/einyx/linux/releases/latest)
 
-## 🗺️ Wiki Navigation
+**Install**:
+```bash
+# Debian/Ubuntu
+wget -O kernel.deb [latest-release-url]
+sudo dpkg -i kernel.deb
 
-### Getting Started
-- [[Getting-Started]] - Quick start guide for new users
-- [[Installation]] - Installing pre-built packages
-- [[Building-from-Source]] - Compile your own kernel
-- [[First-Contribution]] - Make your first kernel contribution
+# Fedora/RHEL  
+wget -O kernel.rpm [latest-release-url]
+sudo rpm -i kernel.rpm
+```
 
-### Security
-- [[Security-Features]] - Built-in security enhancements
-- [[Hardening-Guide]] - Kernel hardening best practices
-- [[Security-Configuration]] - Recommended security settings
-- [[Vulnerability-Reporting]] - How to report security issues
+**Build from source**:
+```bash
+git clone https://github.com/einyx/linux.git
+cd linux
+make defconfig
+make -j$(nproc)
+```
 
-### Development
-- [[Contributing]] - Contribution guidelines
-- [[Development-Workflow]] - Git workflow and best practices
-- [[Coding-Standards]] - Kernel coding style
-- [[Testing]] - Running tests locally
+## Documentation
 
-### CI/CD
-- [[CI-CD-Overview]] - Understanding our pipelines
-- [[GitHub-Actions]] - Workflow descriptions
-- [[Package-Building]] - Automated package creation
-- [[Release-Process]] - How releases work
+**Basics**
+- [[Getting Started]]
+- [[Installation]]
+- [[Building]]
+- [[FAQ]]
 
-### Advanced Topics
-- [[Kernel-Debugging]] - Debugging techniques
-- [[Performance-Tuning]] - Optimization guide
-- [[Custom-Builds]] - Creating custom configurations
-- [[Patch-Management]] - Managing patch series
+**Security**
+- [[Security Features]]
+- [[Hardening Options]]
+- [[Threat Model]]
 
-## 📊 Project Status
+**Development**
+- [[Contributing]]
+- [[Code Style]]
+- [[Testing]]
+- [[Debugging]]
 
-| Component | Status |
-|-----------|--------|
-| Main Branch | ![Build](https://github.com/einyx/linux/workflows/Build%20DEB%20and%20RPM%20packages/badge.svg) |
-| Security Scans | ![Security](https://github.com/einyx/linux/workflows/Security%20Analysis/badge.svg) |
-| Tests | ![Tests](https://github.com/einyx/linux/workflows/Kernel%20Testing/badge.svg) |
-| Documentation | ![Docs](https://github.com/einyx/linux/workflows/Documentation/badge.svg) |
+**Advanced**
+- [[Custom Configs]]
+- [[Cross Compiling]]
+- [[Performance]]
+- [[Troubleshooting]]
 
-## 🚀 Quick Links
+## Features
 
-- 📦 [Latest Releases](https://github.com/einyx/linux/releases)
-- 🐛 [Issue Tracker](https://github.com/einyx/linux/issues)
-- 💬 [Discussions](https://github.com/einyx/linux/discussions)
-- 🔒 [Security Advisories](https://github.com/einyx/linux/security/advisories)
+- Security hardening inspired by grsecurity/PaX
+- Automated CI/CD with multi-arch builds
+- Pre-built packages for major distributions
+- Regular security updates
+- Community-driven development
 
-## 🌟 Why This Project?
+## Status
 
-Traditional Linux kernel development can be intimidating for newcomers. We're changing that by:
-
-1. **Lowering barriers** - Clear documentation and automated checks
-2. **Ensuring quality** - Comprehensive CI/CD pipelines
-3. **Prioritizing security** - Automated vulnerability scanning
-4. **Building community** - Welcoming environment for all skill levels
-
-## 🤝 Get Involved
-
-Whether you're a:
-- 👨‍💻 **Developer** - Contribute code and fixes
-- 🔒 **Security Researcher** - Help identify vulnerabilities
-- 📝 **Technical Writer** - Improve documentation
-- 🧪 **Tester** - Test builds and report issues
-- 👥 **User** - Provide feedback and suggestions
-
-**Everyone is welcome!**
-
-## 📢 Latest News
-
-- 🎉 Automated security scanning now live
-- 📦 Multi-architecture packages available
-- 🔧 PR validation workflows active
-- 📚 Wiki documentation launched
-
----
-
-*Join us in making Linux kernel development more accessible and secure!*
+- Build: ![Build Status](https://github.com/einyx/linux/workflows/Build%20DEB%20and%20RPM%20packages/badge.svg)
+- Security: ![Security Scan](https://github.com/einyx/linux/workflows/Security%20Analysis/badge.svg)
+- Tests: ![Test Status](https://github.com/einyx/linux/workflows/Kernel%20Testing/badge.svg)

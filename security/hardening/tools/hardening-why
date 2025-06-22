@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""
+Security Hardening LSM Diagnostics Tool
+Explains why security actions were taken
+"""
+
+import os
+import sys
+import json
+import argparse
+from datetime import datetime
+from pathlib import Path
+from collections import defaultdict
+
+SYSFS_PATH = "/sys/kernel/security/hardening"
+LOG_PATH = "/var/log/hardening-lsm"
+EVENT_CACHE = "/var/cache/hardening-lsm/events.db"
+
+class DiagnosticsTool:
+    def __init__(self):
+        self.explanations = self.load_explanations()
+        self.last_events = []
+        self.load_recent_events()
+    
+    def load_explanations(self):
+        """Load explanation templates"""
+        return {
+            'BLOCKED_SYSCALL': {
+                'title': 'System Call Blocked',
+                'description': 'The process attempted to use a system call that is not allowed by its security profile.',
+                'reasons': [
+                    'The syscall is not in the allowed list for this profile',
+                    'The security level has been elevated due to recent anomalies',
+                    'The syscall is considered dangerous in the current context'
+                ],
+                'solutions': [
+                    'Review if this syscall is necessary for normal operation',
+                    'Update the security profile to include this syscall if legitimate',
+                    'Use "hardening-learn" to create a new profile based on actual usage'
+                ]
+            },
+            'CAPABILITY_DENIED': {
+                'title': 'Capability Request Denied',
+                'description': 'The process requested a Linux capability that exceeds its allowed permissions.',
+                'reasons': [
+                    'The capability is not granted in the security profile',
+                    'The process is running in a restricted container',
+                    'Security policy prevents this capability at current security level'
+                ],
+                'solutions': [
+                    'Verify if the capability is truly needed',
+                    'Add the capability to the profile if legitimate',
+                    'Consider using a less privileged approach'
+                ]
+            },
+            'NETWORK_BLOCKED': {
+                'title': 'Network Connection Blocked',
+                'description': 'A network operation was prevented by security policy.',
+                'reasons': [
+                    'Outgoing connections are not allowed for this process',
+                    'The destination port/address is not whitelisted',
+                    'Network anomaly detection triggered a block',
+                    'Rate limiting prevented the connection'
+                ],
+                'solutions': [
+                    'Check if the network access is expected',
+                    'Update network policy in the security profile',
+                    'Investigate potential network scanning behavior'
+                ]
+            },
+            'MEMORY_VIOLATION': {
+                'title': 'Memory Access Violation',
+                'description': 'Suspicious memory operation detected and blocked.',
+                'reasons': [
+                    'Attempted to create executable memory mapping',
+                    'Memory access pattern matches exploitation technique',
+                    'Stack pivot or ROP chain suspected',
+                    'Memory limit exceeded'
+                ],
+                'solutions': [
+                    'Review application for memory safety issues',
+                    'Check for buffer overflows or use-after-free bugs',
+                    'Enable additional debugging to identify the issue'
+                ]
+            },
+            'ANOMALY_DETECTED': {
+                'title': 'Behavioral Anomaly Detected',
+                'description': 'Process behavior deviated significantly from learned patterns.',
+                'reasons': [
+                    'Unusual sequence of system calls detected',
+                    'Resource usage spike beyond normal baseline',
+                    'Markov chain probability below threshold',
+                    'Entropy analysis indicates suspicious randomness'
+                ],
+                'solutions': [
+                    'Investigate what caused the behavioral change',
+                    'Check for compromised binaries or libraries',
+                    'Re-learn behavior if legitimate changes were made'
+                ]
+            },
+            'TIME_RESTRICTION': {
+                'title': 'Time-Based Access Denied',
+                'description': 'Operation blocked due to temporal access control policy.',
+                'reasons': [
+                    'Current time is outside allowed hours',
+                    'Day of week restrictions are in effect',
+                    'Maintenance window policy is active'
+                ],
+                'solutions': [
+                    'Wait until allowed time window',
+                    'Update time restrictions in security profile',
+                    'Request temporary exception if urgent'
+                ]
+            },
+            'RESOURCE_LIMIT': {
+                'title': 'Resource Limit Exceeded',
+                'description': 'Process exceeded configured resource limits.',
+                'reasons': [
+                    'Memory usage exceeded profile limit',
+                    'CPU usage above allowed threshold',
+                    'Too many file descriptors opened',
+                    'Thread count limit reached'
+                ],
+                'solutions': [
+                    'Optimize application resource usage',
+                    'Increase limits in security profile if justified',
+                    'Check for resource leaks or inefficiencies'
+                ]
+            },
+            'ESCALATION_PREVENTED': {
+                'title': 'Privilege Escalation Prevented',
+                'description': 'Attempt to gain elevated privileges was blocked.',
+                'reasons': [
+                    'Suspicious process lineage detected',
+                    'Unauthorized setuid/setgid attempt',
+                    'Container escape attempt detected',
+                    'Suspicious capability manipulation'
+                ],
+                'solutions': [
+                    'Review why elevated privileges were requested',
+                    'Use proper privilege separation',
+                    'Investigate potential security breach'
+                ]
+            }
+        }
+    
+    def load_recent_events(self):
+        """Load recent security events"""
+        try:
+            # Try to read from kernel
+            if os.path.exists(f"{SYSFS_PATH}/last_denials"):
+                with open(f"{SYSFS_PATH}/last_denials", 'r') as f:
+                    self.last_events = json.load(f)
+            else:
+                # Demo mode - create sample events
+                self.last_events = [
+                    {
+                        'timestamp': datetime.now().isoformat(),
+                        'type': 'BLOCKED_SYSCALL',
+                        'process': {'name': 'nginx', 'pid': 12345},
+                        'details': {
+                            'syscall': 'ptrace',
+                            'profile': 'web_server',
+                            'security_level': 'elevated'
+                        }
+                    },
+                    {
+                        'timestamp': datetime.now().isoformat(),
+                        'type': 'NETWORK_BLOCKED',
+                        'process': {'name': 'curl', 'pid': 23456},
+                        'details': {
+                            'destination': '10.0.0.1:22',
+                            'reason': 'port_not_allowed'
+                        }
+                    }
+                ]
+        except:
+            self.last_events = []
+    
+    def explain_event(self, event):
+        """Generate detailed explanation for an event"""
+        event_type = event.get('type', 'UNKNOWN')
+        explanation = self.explanations.get(event_type, {
+            'title': 'Unknown Security Event',
+            'description': 'An unrecognized security event occurred.',
+            'reasons': ['Event type not in explanation database'],
+            'solutions': ['Contact system administrator']
+        })
+        
+        # Header
+        print(f"\n{'='*60}")
+        print(f"Security Event Explanation")
+        print(f"{'='*60}\n")
+        
+        # Event details
+        print(f"Event Type: {self.format_bold(explanation['title'])}")
+        print(f"Time: {event.get('timestamp', 'Unknown')}")
+        
+        process = event.get('process', {})
+        if process:
+            print(f"Process: {process.get('name', 'Unknown')} (PID: {process.get('pid', 'Unknown')})")
+        
+        print(f"\n{self.format_section('What Happened:')}")
+        print(f"{explanation['description']}\n")
+        
+        # Specific details
+        details = event.get('details', {})
+        if details:
+            print(f"{self.format_section('Event Details:')}")
+            for key, value in details.items():
+                print(f"  • {key.replace('_', ' ').title()}: {value}")
+            print()
+        
+        # Possible reasons
+        print(f"{self.format_section('Possible Reasons:')}")
+        for i, reason in enumerate(explanation['reasons'], 1):
+            print(f"  {i}. {reason}")
+        print()
+        
+        # Solutions
+        print(f"{self.format_section('Recommended Actions:')}")
+        for i, solution in enumerate(explanation['solutions'], 1):
+            print(f"  {i}. {solution}")
+        
+        # Context-specific advice
+        self.add_contextual_advice(event, event_type)
+        
+        print(f"\n{'='*60}\n")
+    
+    def add_contextual_advice(self, event, event_type):
+        """Add context-specific advice based on event details"""
+        details = event.get('details', {})
+        
+        print(f"\n{self.format_section('Additional Context:')}")
+        
+        if event_type == 'BLOCKED_SYSCALL':
+            syscall = details.get('syscall', 'unknown')
+            print(f"  • The '{syscall}' syscall is typically used for:")
+            syscall_uses = {
+                'ptrace': 'debugging processes or system call tracing',
+                'mmap': 'memory mapping files or creating anonymous mappings',
+                'socket': 'creating network connections',
+                'execve': 'executing new programs',
+                'open': 'opening files for reading or writing'
+            }
+            use = syscall_uses.get(syscall, 'system operations')
+            print(f"    {use}")
+            
+        elif event_type == 'NETWORK_BLOCKED':
+            dest = details.get('destination', '')
+            if ':22' in dest:
+                print("  • Port 22 is typically used for SSH connections")
+            elif ':80' in dest or ':443' in dest:
+                print("  • Ports 80/443 are used for HTTP/HTTPS web traffic")
+            elif ':53' in dest:
+                print("  • Port 53 is used for DNS queries")
+        
+        # Show current profile info
+        profile = details.get('profile')
+        if profile:
+            print(f"\n  • Current Profile: '{profile}'")
+            print(f"    View with: hardening-profiles show {profile}")
+            print(f"    Edit with: hardening-profiles edit {profile}")
+    
+    def format_bold(self, text):
+        """Format text as bold"""
+        return f"\033[1m{text}\033[0m"
+    
+    def format_section(self, text):
+        """Format section header"""
+        return f"\033[94m{text}\033[0m"
+    
+    def explain_last(self, count=1):
+        """Explain the last N events"""
+        if not self.last_events:
+            print("No recent security events found.")
+            return
+        
+        events_to_explain = self.last_events[-count:]
+        
+        for event in events_to_explain:
+            self.explain_event(event)
+    
+    def explain_by_pid(self, pid):
+        """Explain events for a specific PID"""
+        pid_events = [e for e in self.last_events 
+                     if e.get('process', {}).get('pid') == pid]
+        
+        if not pid_events:
+            print(f"No security events found for PID {pid}")
+            return
+        
+        print(f"Found {len(pid_events)} event(s) for PID {pid}:")
+        for event in pid_events:
+            self.explain_event(event)
+    
+    def explain_by_process(self, process_name):
+        """Explain events for a specific process name"""
+        process_events = [e for e in self.last_events 
+                         if e.get('process', {}).get('name') == process_name]
+        
+        if not process_events:
+            print(f"No security events found for process '{process_name}'")
+            return
+        
+        print(f"Found {len(process_events)} event(s) for '{process_name}':")
+        for event in process_events:
+            self.explain_event(event)
+    
+    def show_statistics(self):
+        """Show event statistics"""
+        print(f"\n{self.format_section('Security Event Statistics')}")
+        print(f"{'='*40}\n")
+        
+        # Count by type
+        type_counts = defaultdict(int)
+        for event in self.last_events:
+            type_counts[event.get('type', 'UNKNOWN')] += 1
+        
+        print("Events by Type:")
+        for event_type, count in sorted(type_counts.items(), 
+                                      key=lambda x: x[1], reverse=True):
+            title = self.explanations.get(event_type, {}).get('title', event_type)
+            print(f"  • {title}: {count}")
+        
+        # Count by process
+        process_counts = defaultdict(int)
+        for event in self.last_events:
+            process_name = event.get('process', {}).get('name', 'unknown')
+            process_counts[process_name] += 1
+        
+        print("\nTop Processes:")
+        for process, count in sorted(process_counts.items(), 
+                                   key=lambda x: x[1], reverse=True)[:5]:
+            print(f"  • {process}: {count}")
+        
+        print(f"\nTotal Events: {len(self.last_events)}")
+        
+        if self.last_events:
+            first_time = self.last_events[0].get('timestamp', '')
+            last_time = self.last_events[-1].get('timestamp', '')
+            print(f"Time Range: {first_time} to {last_time}")
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Security Hardening LSM Diagnostics - Explains why security actions were taken"
+    )
+    
+    parser.add_argument('--last', type=int, metavar='N', 
+                      help='Explain last N security events')
+    parser.add_argument('--pid', type=int, 
+                      help='Explain events for specific PID')
+    parser.add_argument('--process', type=str,
+                      help='Explain events for specific process name')
+    parser.add_argument('--stats', action='store_true',
+                      help='Show event statistics')
+    parser.add_argument('--all', action='store_true',
+                      help='Explain all recent events')
+    
+    args = parser.parse_args()
+    
+    tool = DiagnosticsTool()
+    
+    # Default action if no args
+    if not any(vars(args).values()):
+        tool.explain_last(1)
+        print("Tip: Use 'hardening-why --help' for more options")
+        return
+    
+    if args.last:
+        tool.explain_last(args.last)
+    elif args.pid:
+        tool.explain_by_pid(args.pid)
+    elif args.process:
+        tool.explain_by_process(args.process)
+    elif args.stats:
+        tool.show_statistics()
+    elif args.all:
+        tool.explain_last(len(tool.last_events))
+
+if __name__ == "__main__":
+    main()

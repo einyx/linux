@@ -6,6 +6,7 @@ Security Hardening LSM Profile Manager
 import os
 import sys
 import json
+import yaml
 import argparse
 from pathlib import Path
 
@@ -16,51 +17,104 @@ class ProfileManager:
         self.profile_dir = Path(PROFILE_DIR)
         self.profile_dir.mkdir(parents=True, exist_ok=True)
     
-    def list_profiles(self):
+    def list_profiles(self, output_format='text'):
         """List available profiles"""
-        print("Available Security Profiles:")
-        print("-" * 40)
+        profiles_data = []
         
         profiles = list(self.profile_dir.glob("*.json"))
-        if not profiles:
-            print("No profiles found")
-            return
-        
         for profile_file in profiles:
             name = profile_file.stem
             try:
                 with open(profile_file) as f:
                     data = json.load(f)
-                    desc = data.get("description", "No description")
-                    print(f"  {name}: {desc}")
+                    profile_info = {
+                        'name': name,
+                        'description': data.get("description", "No description"),
+                        'version': data.get('version', '1.0'),
+                        'created': data.get('created', 'Unknown')
+                    }
+                    profiles_data.append(profile_info)
             except Exception as e:
-                print(f"  {name}: Error reading profile ({e})")
+                profiles_data.append({
+                    'name': name,
+                    'error': str(e)
+                })
+        
+        # Output formatting
+        if output_format == 'json':
+            print(json.dumps(profiles_data, indent=2))
+        elif output_format == 'yaml':
+            print(yaml.dump(profiles_data, default_flow_style=False))
+        else:
+            # Text format
+            print("Available Security Profiles:")
+            print("-" * 40)
+            if not profiles_data:
+                print("No profiles found")
+            else:
+                for profile in profiles_data:
+                    if 'error' in profile:
+                        print(f"  {profile['name']}: Error - {profile['error']}")
+                    else:
+                        print(f"  {profile['name']}: {profile['description']}")
     
-    def show_profile(self, name):
+    def show_profile(self, name, output_format='text'):
         """Show profile details"""
         profile_file = self.profile_dir / f"{name}.json"
         
         if not profile_file.exists():
-            print(f"Profile '{name}' not found", file=sys.stderr)
+            error_data = {'error': f"Profile '{name}' not found"}
+            if output_format == 'json':
+                print(json.dumps(error_data, indent=2))
+            elif output_format == 'yaml':
+                print(yaml.dump(error_data))
+            else:
+                print(error_data['error'], file=sys.stderr)
             sys.exit(1)
         
         try:
             with open(profile_file) as f:
                 data = json.load(f)
             
-            print(f"Profile: {name}")
-            print("=" * (len(name) + 9))
-            print(f"Description: {data.get('description', 'N/A')}")
-            print(f"Version: {data.get('version', '1.0')}")
-            print()
+            # Add metadata
+            data['_metadata'] = {
+                'file': str(profile_file),
+                'size': profile_file.stat().st_size,
+                'modified': profile_file.stat().st_mtime
+            }
             
-            print("Settings:")
-            for key, value in data.items():
-                if key not in ['name', 'description', 'version']:
-                    print(f"  {key}: {value}")
-                    
+            # Output based on format
+            if output_format == 'json':
+                print(json.dumps(data, indent=2))
+            elif output_format == 'yaml':
+                print(yaml.dump(data, default_flow_style=False))
+            else:
+                # Text format
+                print(f"Profile: {name}")
+                print("=" * (len(name) + 9))
+                print(f"Description: {data.get('description', 'N/A')}")
+                print(f"Version: {data.get('version', '1.0')}")
+                print()
+                
+                print("Settings:")
+                for key, value in data.items():
+                    if key not in ['name', 'description', 'version', '_metadata']:
+                        if isinstance(value, (list, dict)):
+                            print(f"  {key}:")
+                            value_str = json.dumps(value, indent=4)
+                            for line in value_str.split('\n'):
+                                print(f"    {line}")
+                        else:
+                            print(f"  {key}: {value}")
+                        
         except Exception as e:
-            print(f"Error reading profile: {e}", file=sys.stderr)
+            error_data = {'error': f"Error reading profile: {e}"}
+            if output_format == 'json':
+                print(json.dumps(error_data, indent=2))
+            elif output_format == 'yaml':
+                print(yaml.dump(error_data))
+            else:
+                print(error_data['error'], file=sys.stderr)
             sys.exit(1)
     
     def create_profile(self, name, template=None):
@@ -175,15 +229,21 @@ class ProfileManager:
 
 def main():
     parser = argparse.ArgumentParser(description="Security Hardening LSM Profile Manager")
+    parser.add_argument('--format', '-f', choices=['text', 'json', 'yaml'],
+                        default='text', help='Output format')
     
     subparsers = parser.add_subparsers(dest='command', help='Commands')
     
     # List profiles
-    subparsers.add_parser('list', help='List available profiles')
+    list_parser = subparsers.add_parser('list', help='List available profiles')
+    list_parser.add_argument('--format', '-f', choices=['text', 'json', 'yaml'],
+                             help='Output format')
     
     # Show profile
     show_parser = subparsers.add_parser('show', help='Show profile details')
     show_parser.add_argument('name', help='Profile name')
+    show_parser.add_argument('--format', '-f', choices=['text', 'json', 'yaml'],
+                             help='Output format')
     
     # Create profile
     create_parser = subparsers.add_parser('create', help='Create new profile')
@@ -207,10 +267,17 @@ def main():
     
     mgr = ProfileManager()
     
+    # Get format (subcommand format takes precedence over global)
+    fmt = 'text'
+    if hasattr(args, 'format') and args.format:
+        fmt = args.format
+    elif parser.parse_args().format:
+        fmt = parser.parse_args().format
+    
     if args.command == 'list':
-        mgr.list_profiles()
+        mgr.list_profiles(output_format=fmt)
     elif args.command == 'show':
-        mgr.show_profile(args.name)
+        mgr.show_profile(args.name, output_format=fmt)
     elif args.command == 'create':
         mgr.create_profile(args.name, args.template)
     elif args.command == 'delete':

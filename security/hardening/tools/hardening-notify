@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""
+Security Hardening LSM Smart Notifications
+Desktop notifications for security events via D-Bus
+"""
+
+import os
+import sys
+import json
+import time
+import signal
+import argparse
+import threading
+from datetime import datetime
+from collections import defaultdict
+from pathlib import Path
+
+try:
+    import dbus
+    from dbus.mainloop.glib import DBusGMainLoop
+    from gi.repository import GLib
+except ImportError:
+    print("Error: Required packages missing. Install with:", file=sys.stderr)
+    print("  sudo apt install python3-dbus python3-gi", file=sys.stderr)
+    sys.exit(1)
+
+SYSFS_PATH = "/sys/kernel/security/hardening"
+CONFIG_PATH = "/etc/hardening-lsm/notify.conf"
+STATE_PATH = "/var/lib/hardening-lsm/notify.state"
+
+class NotificationConfig:
+    def __init__(self):
+        self.enabled = True
+        self.min_severity = "MEDIUM"
+        self.rate_limit = 10  # Max notifications per minute
+        self.quiet_hours = []  # List of (start_hour, end_hour) tuples
+        self.filters = {
+            "anomaly": True,
+            "blocked": True,
+            "escalation": True,
+            "violation": True
+        }
+        self.smart_grouping = True
+        self.sound_enabled = True
+        self.persistent = False
+        
+        self.load_config()
+    
+    def load_config(self):
+        """Load configuration from file"""
+        if os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, 'r') as f:
+                    config = json.load(f)
+                    self.__dict__.update(config)
+            except Exception as e:
+                print(f"Warning: Failed to load config: {e}", file=sys.stderr)
+    
+    def save_config(self):
+        """Save configuration to file"""
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        try:
+            with open(CONFIG_PATH, 'w') as f:
+                json.dump(self.__dict__, f, indent=2)
+        except Exception as e:
+            print(f"Error saving config: {e}", file=sys.stderr)
+
+class SecurityEvent:
+    def __init__(self, data):
+        self.timestamp = datetime.now()
+        self.type = data.get('type', 'UNKNOWN')
+        self.severity = data.get('severity', 'LOW')
+        self.process = data.get('process', {})
+        self.message = data.get('message', '')
+        self.details = data.get('details', {})
+        self.id = f"{self.type}_{self.process.get('pid', 0)}_{int(self.timestamp.timestamp())}"
+
+class NotificationService:
+    def __init__(self):
+        self.config = NotificationConfig()
+        self.bus = dbus.SessionBus()
+        self.notifications = {}
+        self.event_counts = defaultdict(int)
+        self.last_notification = {}
+        self.running = True
+        
+        # Rate limiting
+        self.notification_times = []
+        
+        # Event monitoring thread
+        self.monitor_thread = None
+        
+        # Initialize D-Bus
+        DBusGMainLoop(set_as_default=True)
+        
+        # Get notification interface
+        self.notify_obj = self.bus.get_object(
+            'org.freedesktop.Notifications',
+            '/org/freedesktop/Notifications'
+        )
+        self.notify_iface = dbus.Interface(
+            self.notify_obj,
+            'org.freedesktop.Notifications'
+        )
+    
+    def is_quiet_hours(self):
+        """Check if current time is in quiet hours"""
+        current_hour = datetime.now().hour
+        for start, end in self.config.quiet_hours:
+            if start <= current_hour < end:
+                return True
+        return False
+    
+    def should_notify(self, event):
+        """Determine if event should trigger notification"""
+        # Check if notifications are enabled
+        if not self.config.enabled:
+            return False
+        
+        # Check quiet hours
+        if self.is_quiet_hours():
+            return False
+        
+        # Check event type filter
+        if not self.config.filters.get(event.type.lower(), True):
+            return False
+        
+        # Check severity
+        severity_levels = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+        if event.severity not in severity_levels:
+            return False
+        
+        min_level_idx = severity_levels.index(self.config.min_severity)
+        event_level_idx = severity_levels.index(event.severity)
+        
+        if event_level_idx < min_level_idx:
+            return False
+        
+        # Rate limiting
+        now = time.time()
+        self.notification_times = [t for t in self.notification_times if now - t < 60]
+        
+        if len(self.notification_times) >= self.config.rate_limit:
+            return False
+        
+        # Smart grouping - avoid duplicate notifications
+        if self.config.smart_grouping:
+            key = f"{event.type}_{event.process.get('name', '')}"
+            last_time = self.last_notification.get(key, 0)
+            if now - last_time < 30:  # 30 second cooldown for similar events
+                return False
+            self.last_notification[key] = now
+        
+        return True
+    
+    def format_notification(self, event):
+        """Format event into notification content"""
+        # Icon based on severity
+        icons = {
+            "LOW": "dialog-information",
+            "MEDIUM": "dialog-warning",
+            "HIGH": "dialog-error",
+            "CRITICAL": "dialog-error"
+        }
+        icon = icons.get(event.severity, "dialog-information")
+        
+        # Title
+        title = f"Security Alert: {event.type}"
+        
+        # Body with smart formatting
+        process_info = event.process
+        body_parts = []
+        
+        if process_info.get('name'):
+            body_parts.append(f"Process: {process_info['name']} (PID: {process_info.get('pid', 'unknown')})")
+        
+        body_parts.append(f"Severity: {event.severity}")
+        
+        if event.message:
+            body_parts.append(f"\n{event.message}")
+        
+        # Add actionable recommendations
+        recommendations = self.get_recommendations(event)
+        if recommendations:
+            body_parts.append(f"\nRecommended Action: {recommendations}")
+        
+        body = "\n".join(body_parts)
+        
+        # Actions
+        actions = []
+        if event.severity in ["HIGH", "CRITICAL"]:
+            actions = ["investigate", "Investigate", "block", "Block Process", "dismiss", "Dismiss"]
+        else:
+            actions = ["details", "View Details", "dismiss", "Dismiss"]
+        
+        # Hints for notification behavior
+        hints = {
+            'urgency': 2 if event.severity == "CRITICAL" else 1,
+            'category': 'security',
+            'desktop-entry': 'hardening-lsm'
+        }
+        
+        if self.config.sound_enabled and event.severity in ["HIGH", "CRITICAL"]:
+            hints['sound-name'] = 'dialog-warning'
+        
+        return {
+            'title': title,
+            'body': body,
+            'icon': icon,
+            'actions': actions,
+            'hints': hints,
+            'timeout': 0 if self.config.persistent else 10000  # 10 seconds or persistent
+        }
+    
+    def get_recommendations(self, event):
+        """Get actionable recommendations for event"""
+        recommendations = {
+            "ANOMALY": "Review process behavior in security dashboard",
+            "BLOCKED": "Check if this is expected behavior for the application",
+            "ESCALATION": "Security level increased - monitor system closely",
+            "VIOLATION": "Investigate potential security breach attempt"
+        }
+        
+        if event.severity == "CRITICAL":
+            return "IMMEDIATE ACTION REQUIRED - " + recommendations.get(event.type, "Review system logs")
+        
+        return recommendations.get(event.type, "")
+    
+    def send_notification(self, event):
+        """Send desktop notification"""
+        if not self.should_notify(event):
+            return
+        
+        notif = self.format_notification(event)
+        
+        try:
+            # Send notification
+            notif_id = self.notify_iface.Notify(
+                'Security Hardening LSM',  # App name
+                0,  # Replaces ID
+                notif['icon'],
+                notif['title'],
+                notif['body'],
+                notif['actions'],
+                notif['hints'],
+                notif['timeout']
+            )
+            
+            # Track notification
+            self.notifications[notif_id] = event
+            self.notification_times.append(time.time())
+            
+            # Handle notification actions
+            self.notify_iface.connect_to_signal(
+                "ActionInvoked",
+                lambda id, action: self.handle_action(id, action)
+            )
+            
+        except dbus.DBusException as e:
+            print(f"Failed to send notification: {e}", file=sys.stderr)
+    
+    def handle_action(self, notif_id, action):
+        """Handle notification action clicks"""
+        event = self.notifications.get(notif_id)
+        if not event:
+            return
+        
+        if action == "investigate":
+            # Launch dashboard focused on this event
+            os.system(f"hardening-dashboard --focus-event {event.id} &")
+        elif action == "block":
+            # Block the process
+            if event.process.get('pid'):
+                os.system(f"hardening-ctl block-pid {event.process['pid']}")
+        elif action == "details":
+            # Show detailed event information
+            self.show_event_details(event)
+    
+    def show_event_details(self, event):
+        """Show detailed event information"""
+        # Could open a detailed view or log file
+        details = json.dumps({
+            'timestamp': event.timestamp.isoformat(),
+            'type': event.type,
+            'severity': event.severity,
+            'process': event.process,
+            'details': event.details
+        }, indent=2)
+        
+        # Send as a new notification with details
+        self.notify_iface.Notify(
+            'Security Hardening LSM',
+            0,
+            'dialog-information',
+            f"Event Details: {event.type}",
+            details,
+            [],
+            {},
+            15000  # 15 seconds
+        )
+    
+    def monitor_events(self):
+        """Monitor kernel events and trigger notifications"""
+        # This would connect to actual kernel event source
+        event_file = f"{SYSFS_PATH}/events"
+        
+        while self.running:
+            try:
+                if os.path.exists(event_file):
+                    # Read real events from kernel
+                    with open(event_file, 'r') as f:
+                        for line in f:
+                            try:
+                                event_data = json.loads(line)
+                                event = SecurityEvent(event_data)
+                                self.send_notification(event)
+                            except:
+                                pass
+                else:
+                    # Demo mode - simulate events
+                    import random
+                    if random.random() < 0.1:  # 10% chance per second
+                        demo_event = SecurityEvent({
+                            'type': random.choice(['ANOMALY', 'BLOCKED', 'VIOLATION']),
+                            'severity': random.choice(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+                            'process': {
+                                'name': f'demo_app_{random.randint(1, 5)}',
+                                'pid': random.randint(1000, 9999)
+                            },
+                            'message': 'Suspicious behavior detected in demo mode'
+                        })
+                        self.send_notification(demo_event)
+                
+                time.sleep(1)
+                
+            except Exception as e:
+                print(f"Error monitoring events: {e}", file=sys.stderr)
+                time.sleep(5)
+    
+    def start(self):
+        """Start notification service"""
+        print("Starting Security Hardening LSM Notification Service...")
+        
+        # Start event monitoring thread
+        self.monitor_thread = threading.Thread(target=self.monitor_events, daemon=True)
+        self.monitor_thread.start()
+        
+        # Run main loop
+        try:
+            loop = GLib.MainLoop()
+            loop.run()
+        except KeyboardInterrupt:
+            self.stop()
+    
+    def stop(self):
+        """Stop notification service"""
+        print("\nStopping notification service...")
+        self.running = False
+        self.config.save_config()
+
+def main():
+    parser = argparse.ArgumentParser(description="Security Hardening LSM Smart Notifications")
+    parser.add_argument('--config', help='Configuration file path')
+    parser.add_argument('--daemon', action='store_true', help='Run as daemon')
+    parser.add_argument('--test', action='store_true', help='Send test notification')
+    
+    args = parser.parse_args()
+    
+    if args.test:
+        # Send test notification
+        service = NotificationService()
+        test_event = SecurityEvent({
+            'type': 'TEST',
+            'severity': 'HIGH',
+            'process': {'name': 'test_process', 'pid': 12345},
+            'message': 'This is a test notification from Security Hardening LSM'
+        })
+        service.send_notification(test_event)
+        print("Test notification sent")
+        return
+    
+    # Set up signal handlers
+    service = NotificationService()
+    signal.signal(signal.SIGTERM, lambda s, f: service.stop())
+    signal.signal(signal.SIGINT, lambda s, f: service.stop())
+    
+    # Check if running as daemon
+    if args.daemon:
+        # Could implement proper daemonization here
+        pass
+    
+    # Start service
+    service.start()
+
+if __name__ == "__main__":
+    main()

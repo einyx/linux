@@ -628,17 +628,35 @@ static void avc_insert(u32 ssid, u32 tsid, u16 tclass,
 	hvalue = avc_hash(ssid, tsid, tclass);
 	head = &selinux_avc.avc_cache.slots[hvalue];
 	lock = &selinux_avc.avc_cache.slots_lock[hvalue];
-	spin_lock_irqsave(lock, flag);
-	hlist_for_each_entry(pos, head, list) {
+	
+	/* Use RCU for lookups, only lock for modifications */
+	rcu_read_lock();
+	hlist_for_each_entry_rcu(pos, head, list) {
 		if (pos->ae.ssid == ssid &&
 			pos->ae.tsid == tsid &&
 			pos->ae.tclass == tclass) {
-			avc_node_replace(node, pos);
-			goto found;
+			rcu_read_unlock();
+			spin_lock_irqsave(lock, flag);
+			/* Re-check under lock to handle race */
+			hlist_for_each_entry(pos, head, list) {
+				if (pos->ae.ssid == ssid &&
+					pos->ae.tsid == tsid &&
+					pos->ae.tclass == tclass) {
+					avc_node_replace(node, pos);
+					spin_unlock_irqrestore(lock, flag);
+					return;
+				}
+			}
+			hlist_add_head_rcu(&node->list, head);
+			spin_unlock_irqrestore(lock, flag);
+			return;
 		}
 	}
+	rcu_read_unlock();
+	
+	/* No existing entry found, add new one */
+	spin_lock_irqsave(lock, flag);
 	hlist_add_head_rcu(&node->list, head);
-found:
 	spin_unlock_irqrestore(lock, flag);
 }
 

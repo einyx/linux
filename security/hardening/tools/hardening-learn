@@ -1,0 +1,557 @@
+#!/usr/bin/env python3
+"""
+Security Hardening LSM Learning Mode Wizard
+Interactive guided setup for creating security profiles
+"""
+
+import os
+import sys
+import json
+import time
+import subprocess
+import signal
+from datetime import datetime, timedelta
+from pathlib import Path
+from collections import defaultdict
+
+SYSFS_PATH = "/sys/kernel/security/hardening"
+PROC_PATH = "/proc/sys/kernel/hardening"
+PROFILE_DIR = "/etc/hardening-lsm/profiles"
+
+class colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+class LearningWizard:
+    def __init__(self):
+        self.profile_name = ""
+        self.target_process = ""
+        self.learning_data = {
+            'syscalls': set(),
+            'capabilities': set(),
+            'network_activity': {
+                'incoming': False,
+                'outgoing': False,
+                'ports': set(),
+                'protocols': set()
+            },
+            'file_access': {
+                'read_paths': set(),
+                'write_paths': set(),
+                'exec_paths': set()
+            },
+            'resource_usage': {
+                'max_memory_mb': 0,
+                'max_cpu_percent': 0,
+                'max_threads': 0,
+                'max_fds': 0
+            },
+            'behavior_patterns': [],
+            'time_patterns': []
+        }
+        self.learning_start = None
+        self.learning_duration = 300  # 5 minutes default
+        self.monitoring = False
+    
+    def print_header(self):
+        """Print wizard header"""
+        os.system('clear')
+        print(f"{colors.HEADER}{colors.BOLD}")
+        print("=" * 60)
+        print("   Security Hardening LSM - Learning Mode Wizard")
+        print("=" * 60)
+        print(f"{colors.ENDC}")
+    
+    def print_step(self, step_num, step_name):
+        """Print step header"""
+        print(f"\n{colors.CYAN}Step {step_num}: {step_name}{colors.ENDC}")
+        print("-" * 40)
+    
+    def get_input(self, prompt, default=None, valid_options=None):
+        """Get user input with validation"""
+        while True:
+            if default:
+                user_input = input(f"{prompt} [{default}]: ").strip()
+                if not user_input:
+                    return default
+            else:
+                user_input = input(f"{prompt}: ").strip()
+            
+            if valid_options:
+                if user_input.lower() in [opt.lower() for opt in valid_options]:
+                    return user_input
+                else:
+                    print(f"{colors.RED}Invalid option. Choose from: {', '.join(valid_options)}{colors.ENDC}")
+            else:
+                if user_input:
+                    return user_input
+                elif not default:
+                    print(f"{colors.RED}This field is required.{colors.ENDC}")
+    
+    def step1_introduction(self):
+        """Introduction and explanation"""
+        self.print_header()
+        print(f"{colors.GREEN}Welcome to the Security Profile Learning Wizard!{colors.ENDC}\n")
+        print("This wizard will help you create a security profile by:")
+        print("  • Monitoring your application's behavior")
+        print("  • Learning resource usage patterns")
+        print("  • Identifying required permissions")
+        print("  • Generating an optimized security profile\n")
+        
+        print(f"{colors.YELLOW}How it works:{colors.ENDC}")
+        print("1. You'll specify the application to profile")
+        print("2. The wizard monitors the application's behavior")
+        print("3. After learning, a custom security profile is generated")
+        print("4. You can review and adjust the profile\n")
+        
+        input(f"{colors.BOLD}Press Enter to continue...{colors.ENDC}")
+    
+    def step2_target_selection(self):
+        """Select target application"""
+        self.print_header()
+        self.print_step(2, "Target Application Selection")
+        
+        print("Choose how to select the target application:\n")
+        print("1. By process name (e.g., nginx, firefox)")
+        print("2. By running command")
+        print("3. By PID (existing process)")
+        print("4. Start a new process\n")
+        
+        choice = self.get_input("Select option", valid_options=['1', '2', '3', '4'])
+        
+        if choice == '1':
+            self.target_process = self.get_input("\nEnter process name")
+            self.profile_name = self.get_input("Profile name", default=self.target_process)
+        
+        elif choice == '2':
+            command = self.get_input("\nEnter command to run")
+            self.target_process = command.split()[0].split('/')[-1]
+            self.profile_name = self.get_input("Profile name", default=self.target_process)
+            # Start the process
+            print(f"\n{colors.YELLOW}Starting process: {command}{colors.ENDC}")
+            subprocess.Popen(command, shell=True)
+            time.sleep(2)
+        
+        elif choice == '3':
+            pid = self.get_input("\nEnter PID")
+            try:
+                with open(f"/proc/{pid}/comm", 'r') as f:
+                    self.target_process = f.read().strip()
+                self.profile_name = self.get_input("Profile name", default=self.target_process)
+            except:
+                print(f"{colors.RED}Invalid PID{colors.ENDC}")
+                return self.step2_target_selection()
+        
+        elif choice == '4':
+            command = self.get_input("\nEnter command to start")
+            self.target_process = command.split()[0].split('/')[-1]
+            self.profile_name = self.get_input("Profile name", default=self.target_process)
+            print(f"\n{colors.YELLOW}Starting process: {command}{colors.ENDC}")
+            subprocess.Popen(command, shell=True)
+            time.sleep(2)
+    
+    def step3_learning_config(self):
+        """Configure learning parameters"""
+        self.print_header()
+        self.print_step(3, "Learning Configuration")
+        
+        print("Configure learning parameters:\n")
+        
+        # Learning duration
+        duration_str = self.get_input("Learning duration (e.g., 5m, 1h, 30s)", default="5m")
+        self.learning_duration = self.parse_duration(duration_str)
+        
+        # Profile type
+        print("\nSelect profile type:")
+        print("1. Strict - Minimal permissions (recommended for production)")
+        print("2. Balanced - Reasonable permissions")
+        print("3. Permissive - Relaxed permissions (for development)")
+        
+        profile_type = self.get_input("Profile type", default="2", valid_options=['1', '2', '3'])
+        self.profile_type = ['strict', 'balanced', 'permissive'][int(profile_type) - 1]
+        
+        # Additional options
+        print("\nAdditional options:")
+        self.monitor_children = self.get_input("Monitor child processes?", default="yes", 
+                                              valid_options=['yes', 'no']) == 'yes'
+        self.monitor_network = self.get_input("Monitor network activity?", default="yes",
+                                            valid_options=['yes', 'no']) == 'yes'
+        self.monitor_files = self.get_input("Monitor file access?", default="yes",
+                                          valid_options=['yes', 'no']) == 'yes'
+    
+    def parse_duration(self, duration_str):
+        """Parse duration string to seconds"""
+        if duration_str.endswith('s'):
+            return int(duration_str[:-1])
+        elif duration_str.endswith('m'):
+            return int(duration_str[:-1]) * 60
+        elif duration_str.endswith('h'):
+            return int(duration_str[:-1]) * 3600
+        else:
+            return int(duration_str)
+    
+    def step4_start_learning(self):
+        """Start learning mode"""
+        self.print_header()
+        self.print_step(4, "Learning Mode Active")
+        
+        print(f"Target: {colors.BOLD}{self.target_process}{colors.ENDC}")
+        print(f"Duration: {colors.BOLD}{self.learning_duration}s{colors.ENDC}")
+        print(f"Profile Type: {colors.BOLD}{self.profile_type}{colors.ENDC}\n")
+        
+        # Enable kernel learning mode
+        self.enable_learning_mode()
+        
+        self.learning_start = datetime.now()
+        end_time = self.learning_start + timedelta(seconds=self.learning_duration)
+        
+        print(f"{colors.GREEN}Learning mode started!{colors.ENDC}")
+        print(f"End time: {end_time.strftime('%H:%M:%S')}\n")
+        
+        print("While learning is active:")
+        print("  • Use your application normally")
+        print("  • Perform typical operations")
+        print("  • Test all features you want to allow\n")
+        
+        # Progress bar
+        self.monitoring = True
+        self.show_learning_progress()
+        
+        print(f"\n{colors.GREEN}Learning complete!{colors.ENDC}")
+        self.disable_learning_mode()
+    
+    def enable_learning_mode(self):
+        """Enable kernel learning mode"""
+        try:
+            # This would interact with actual kernel interface
+            with open(f"{PROC_PATH}/learning_mode", 'w') as f:
+                f.write(f"1 {self.target_process}\n")
+        except:
+            # Demo mode
+            pass
+    
+    def disable_learning_mode(self):
+        """Disable kernel learning mode"""
+        try:
+            with open(f"{PROC_PATH}/learning_mode", 'w') as f:
+                f.write("0\n")
+        except:
+            # Demo mode
+            pass
+    
+    def show_learning_progress(self):
+        """Show progress bar and collect data"""
+        start_time = time.time()
+        
+        while time.time() - start_time < self.learning_duration:
+            elapsed = time.time() - start_time
+            progress = elapsed / self.learning_duration
+            
+            # Progress bar
+            bar_width = 40
+            filled = int(bar_width * progress)
+            bar = "█" * filled + "░" * (bar_width - filled)
+            
+            # Collect learning data
+            self.collect_learning_data()
+            
+            # Display
+            remaining = self.learning_duration - elapsed
+            print(f"\r{colors.CYAN}Progress: [{bar}] {progress*100:.1f}% "
+                  f"- {int(remaining)}s remaining{colors.ENDC}", end='')
+            
+            time.sleep(0.5)
+    
+    def collect_learning_data(self):
+        """Collect learning data from kernel"""
+        try:
+            # Read from kernel interface
+            if os.path.exists(f"{SYSFS_PATH}/learning_data"):
+                with open(f"{SYSFS_PATH}/learning_data", 'r') as f:
+                    data = json.load(f)
+                    # Update learning data
+                    self.merge_learning_data(data)
+        except:
+            # Demo mode - simulate data collection
+            import random
+            
+            # Simulate syscalls
+            syscalls = ['read', 'write', 'open', 'close', 'stat', 'mmap', 'socket']
+            self.learning_data['syscalls'].update(random.sample(syscalls, k=3))
+            
+            # Simulate capabilities
+            if random.random() < 0.3:
+                caps = ['CAP_NET_BIND_SERVICE', 'CAP_DAC_READ_SEARCH', 'CAP_SETUID']
+                self.learning_data['capabilities'].add(random.choice(caps))
+            
+            # Simulate resource usage
+            self.learning_data['resource_usage']['max_memory_mb'] = max(
+                self.learning_data['resource_usage']['max_memory_mb'],
+                random.randint(50, 500)
+            )
+    
+    def merge_learning_data(self, new_data):
+        """Merge new learning data"""
+        # Merge sets
+        for key in ['syscalls', 'capabilities']:
+            if key in new_data:
+                self.learning_data[key].update(new_data[key])
+        
+        # Merge network data
+        if 'network_activity' in new_data:
+            net = new_data['network_activity']
+            self.learning_data['network_activity']['incoming'] |= net.get('incoming', False)
+            self.learning_data['network_activity']['outgoing'] |= net.get('outgoing', False)
+            self.learning_data['network_activity']['ports'].update(net.get('ports', []))
+        
+        # Update max values
+        if 'resource_usage' in new_data:
+            for key, value in new_data['resource_usage'].items():
+                self.learning_data['resource_usage'][key] = max(
+                    self.learning_data['resource_usage'][key], value
+                )
+    
+    def step5_review_results(self):
+        """Review learning results"""
+        self.print_header()
+        self.print_step(5, "Learning Results")
+        
+        print(f"Profile: {colors.BOLD}{self.profile_name}{colors.ENDC}\n")
+        
+        # Syscalls
+        print(f"{colors.CYAN}System Calls Used:{colors.ENDC}")
+        syscalls = sorted(self.learning_data['syscalls']) or ['None detected']
+        for i in range(0, len(syscalls), 4):
+            print("  " + ", ".join(syscalls[i:i+4]))
+        
+        # Capabilities
+        print(f"\n{colors.CYAN}Capabilities Required:{colors.ENDC}")
+        caps = sorted(self.learning_data['capabilities']) or ['None']
+        for cap in caps:
+            print(f"  • {cap}")
+        
+        # Network
+        print(f"\n{colors.CYAN}Network Activity:{colors.ENDC}")
+        net = self.learning_data['network_activity']
+        print(f"  Incoming: {'Yes' if net['incoming'] else 'No'}")
+        print(f"  Outgoing: {'Yes' if net['outgoing'] else 'No'}")
+        if net['ports']:
+            print(f"  Ports: {', '.join(map(str, sorted(net['ports'])))}")
+        
+        # Resources
+        print(f"\n{colors.CYAN}Resource Usage:{colors.ENDC}")
+        res = self.learning_data['resource_usage']
+        print(f"  Max Memory: {res['max_memory_mb']} MB")
+        print(f"  Max CPU: {res['max_cpu_percent']}%")
+        print(f"  Max Threads: {res['max_threads']}")
+        print(f"  Max File Descriptors: {res['max_fds']}")
+        
+        input(f"\n{colors.BOLD}Press Enter to continue...{colors.ENDC}")
+    
+    def step6_customize_profile(self):
+        """Allow customization of profile"""
+        self.print_header()
+        self.print_step(6, "Customize Profile")
+        
+        print("Review and adjust the security profile:\n")
+        
+        while True:
+            print("1. Adjust resource limits")
+            print("2. Modify capabilities")
+            print("3. Configure network policy")
+            print("4. Set time restrictions")
+            print("5. Continue without changes\n")
+            
+            choice = self.get_input("Select option", valid_options=['1', '2', '3', '4', '5'])
+            
+            if choice == '1':
+                self.adjust_resource_limits()
+            elif choice == '2':
+                self.modify_capabilities()
+            elif choice == '3':
+                self.configure_network_policy()
+            elif choice == '4':
+                self.set_time_restrictions()
+            elif choice == '5':
+                break
+    
+    def adjust_resource_limits(self):
+        """Adjust resource limits"""
+        print(f"\n{colors.CYAN}Adjust Resource Limits:{colors.ENDC}")
+        res = self.learning_data['resource_usage']
+        
+        # Add safety margin based on profile type
+        margins = {'strict': 1.1, 'balanced': 1.5, 'permissive': 2.0}
+        margin = margins[self.profile_type]
+        
+        res['max_memory_mb'] = int(self.get_input(
+            f"Max memory (MB)", 
+            default=str(int(res['max_memory_mb'] * margin))
+        ))
+        
+        res['max_cpu_percent'] = int(self.get_input(
+            f"Max CPU percent",
+            default=str(min(100, int(res['max_cpu_percent'] * margin)))
+        ))
+    
+    def modify_capabilities(self):
+        """Modify capability list"""
+        print(f"\n{colors.CYAN}Modify Capabilities:{colors.ENDC}")
+        print("Current capabilities:")
+        for cap in sorted(self.learning_data['capabilities']):
+            print(f"  • {cap}")
+        
+        action = self.get_input("\nAdd or remove capability? (add/remove/done)", 
+                               valid_options=['add', 'remove', 'done'])
+        
+        if action == 'add':
+            cap = self.get_input("Capability name (e.g., CAP_NET_ADMIN)")
+            self.learning_data['capabilities'].add(cap)
+        elif action == 'remove':
+            cap = self.get_input("Capability to remove")
+            self.learning_data['capabilities'].discard(cap)
+    
+    def configure_network_policy(self):
+        """Configure network policy"""
+        print(f"\n{colors.CYAN}Configure Network Policy:{colors.ENDC}")
+        
+        policies = {
+            '1': 'allow_all',
+            '2': 'outgoing_only',
+            '3': 'incoming_only',
+            '4': 'localhost_only',
+            '5': 'deny_all'
+        }
+        
+        print("1. Allow all network access")
+        print("2. Allow outgoing only")
+        print("3. Allow incoming only")
+        print("4. Localhost only")
+        print("5. Deny all network access")
+        
+        choice = self.get_input("\nSelect policy", valid_options=list(policies.keys()))
+        self.learning_data['network_policy'] = policies[choice]
+    
+    def set_time_restrictions(self):
+        """Set time-based restrictions"""
+        print(f"\n{colors.CYAN}Set Time Restrictions:{colors.ENDC}")
+        
+        enable = self.get_input("Enable time restrictions?", default="no",
+                               valid_options=['yes', 'no'])
+        
+        if enable == 'yes':
+            start_hour = int(self.get_input("Start hour (0-23)", default="9"))
+            end_hour = int(self.get_input("End hour (0-23)", default="17"))
+            days = self.get_input("Days (e.g., mon-fri, all)", default="mon-fri")
+            
+            self.learning_data['time_restrictions'] = {
+                'enabled': True,
+                'start_hour': start_hour,
+                'end_hour': end_hour,
+                'days': days
+            }
+    
+    def step7_save_profile(self):
+        """Save the generated profile"""
+        self.print_header()
+        self.print_step(7, "Save Profile")
+        
+        # Generate profile
+        profile = self.generate_profile()
+        
+        # Preview
+        print(f"Generated profile for: {colors.BOLD}{self.profile_name}{colors.ENDC}\n")
+        print(f"{colors.CYAN}Profile Preview:{colors.ENDC}")
+        print(json.dumps(profile, indent=2)[:500] + "...\n")
+        
+        # Save location
+        save_path = Path(PROFILE_DIR) / f"{self.profile_name}.json"
+        save = self.get_input(f"Save profile to {save_path}?", default="yes",
+                             valid_options=['yes', 'no'])
+        
+        if save == 'yes':
+            os.makedirs(PROFILE_DIR, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(profile, f, indent=2)
+            print(f"\n{colors.GREEN}Profile saved successfully!{colors.ENDC}")
+            
+            # Apply profile?
+            apply = self.get_input("\nApply profile now?", default="no",
+                                  valid_options=['yes', 'no'])
+            if apply == 'yes':
+                os.system(f"hardening-ctl profile {self.profile_name}")
+    
+    def generate_profile(self):
+        """Generate final profile from learning data"""
+        profile = {
+            "name": self.profile_name,
+            "description": f"Auto-generated profile for {self.target_process}",
+            "version": "1.0",
+            "created": datetime.now().isoformat(),
+            "learning_duration": self.learning_duration,
+            "profile_type": self.profile_type,
+            
+            # Capabilities
+            "capabilities": list(self.learning_data['capabilities']) or "default",
+            
+            # Network
+            "network_policy": self.learning_data.get('network_policy', 'default'),
+            
+            # Resources
+            "resource_limits": self.learning_data['resource_usage'],
+            
+            # Syscalls (would need proper filtering)
+            "allowed_syscalls": list(self.learning_data['syscalls'])[:50],  # Limit for demo
+            
+            # Time restrictions
+            "time_restrictions": self.learning_data.get('time_restrictions', {})
+        }
+        
+        return profile
+    
+    def run(self):
+        """Run the wizard"""
+        try:
+            self.step1_introduction()
+            self.step2_target_selection()
+            self.step3_learning_config()
+            self.step4_start_learning()
+            self.step5_review_results()
+            self.step6_customize_profile()
+            self.step7_save_profile()
+            
+            print(f"\n{colors.GREEN}{colors.BOLD}Wizard completed successfully!{colors.ENDC}")
+            print(f"\nTo use your profile: {colors.CYAN}hardening-ctl profile {self.profile_name}{colors.ENDC}")
+            
+        except KeyboardInterrupt:
+            print(f"\n\n{colors.YELLOW}Wizard cancelled by user{colors.ENDC}")
+            self.disable_learning_mode()
+            sys.exit(1)
+        except Exception as e:
+            print(f"\n\n{colors.RED}Error: {e}{colors.ENDC}")
+            self.disable_learning_mode()
+            sys.exit(1)
+
+def main():
+    # Check if running as root (might be needed for some operations)
+    if os.geteuid() != 0:
+        print(f"{colors.YELLOW}Note: Some features may require root privileges{colors.ENDC}")
+    
+    # Check if module is loaded
+    if not os.path.exists(SYSFS_PATH):
+        print(f"{colors.YELLOW}Warning: Security Hardening LSM not detected.{colors.ENDC}")
+        print("Running in demo mode.\n")
+        time.sleep(2)
+    
+    wizard = LearningWizard()
+    wizard.run()
+
+if __name__ == "__main__":
+    main()

@@ -7,6 +7,7 @@ import sys
 import os
 import argparse
 import json
+import yaml
 
 SYSFS_PATH = "/sys/kernel/security/hardening"
 PROC_PATH = "/proc/sys/kernel/hardening"
@@ -54,13 +55,60 @@ class HardeningControl:
             print(f"Error setting enforcement mode: {e}", file=sys.stderr)
             sys.exit(1)
     
-    def status(self):
+    def status(self, output_format='text'):
         """Show current status"""
         try:
-            with open(f"{SYSFS_PATH}/status", "r") as f:
-                print(f.read())
+            # Gather status data
+            status_data = {}
+            
+            # Basic status
+            try:
+                with open(f"{PROC_PATH}/enabled", "r") as f:
+                    status_data['enabled'] = f.read().strip() == '1'
+            except:
+                status_data['enabled'] = False
+            
+            try:
+                with open(f"{PROC_PATH}/enforce", "r") as f:
+                    status_data['enforcing'] = f.read().strip() == '1'
+            except:
+                status_data['enforcing'] = False
+            
+            # Statistics
+            if os.path.exists(f"{SYSFS_PATH}/stats"):
+                with open(f"{SYSFS_PATH}/stats", "r") as f:
+                    stats_text = f.read()
+                    # Parse stats (would need actual format)
+                    status_data['statistics'] = {
+                        'total_checks': 0,
+                        'blocked_operations': 0,
+                        'anomalies_detected': 0
+                    }
+            
+            # Output formatting
+            if output_format == 'json':
+                print(json.dumps(status_data, indent=2))
+            elif output_format == 'yaml':
+                print(yaml.dump(status_data, default_flow_style=False))
+            else:
+                # Text format
+                print(f"Security Hardening LSM Status")
+                print(f"Enabled: {'Yes' if status_data.get('enabled') else 'No'}")
+                print(f"Mode: {'Enforcing' if status_data.get('enforcing') else 'Permissive'}")
+                if 'statistics' in status_data:
+                    stats = status_data['statistics']
+                    print(f"\nStatistics:")
+                    print(f"  Total Checks: {stats.get('total_checks', 0)}")
+                    print(f"  Blocked Operations: {stats.get('blocked_operations', 0)}")
+                    print(f"  Anomalies Detected: {stats.get('anomalies_detected', 0)}")
+                    
         except Exception as e:
-            print(f"Error reading status: {e}", file=sys.stderr)
+            if output_format == 'json':
+                print(json.dumps({'error': str(e)}, indent=2))
+            elif output_format == 'yaml':
+                print(yaml.dump({'error': str(e)}))
+            else:
+                print(f"Error reading status: {e}", file=sys.stderr)
             sys.exit(1)
     
     def set_level(self, level):
@@ -103,6 +151,8 @@ class HardeningControl:
 
 def main():
     parser = argparse.ArgumentParser(description="Security Hardening LSM Control")
+    parser.add_argument('--format', '-f', choices=['text', 'json', 'yaml'],
+                        default='text', help='Output format')
     
     subparsers = parser.add_subparsers(dest='command', help='Commands')
     
@@ -115,7 +165,9 @@ def main():
     subparsers.add_parser('permissive', help='Set permissive mode')
     
     # Status
-    subparsers.add_parser('status', help='Show current status')
+    status_parser = subparsers.add_parser('status', help='Show current status')
+    status_parser.add_argument('--format', '-f', choices=['text', 'json', 'yaml'],
+                               default='text', help='Output format')
     
     # Security level
     level_parser = subparsers.add_parser('level', help='Set security level')
@@ -142,7 +194,9 @@ def main():
     elif args.command == 'permissive':
         ctl.enforce(False)
     elif args.command == 'status':
-        ctl.status()
+        # Use subcommand format if specified, otherwise global format
+        fmt = getattr(args, 'format', None) or parser.parse_args().format
+        ctl.status(output_format=fmt)
     elif args.command == 'level':
         ctl.set_level(args.level)
     elif args.command == 'profile':

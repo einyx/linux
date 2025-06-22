@@ -1,0 +1,16 @@
+[Unit]
+Description=Security Hardening LSM for %i
+Documentation=https://github.com/einyx/linux/wiki/Security-Hardening-LSM-Guide
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/bin/hardening-systemd check %i
+ExecStart=/usr/bin/hardening-systemd apply %i
+ExecStop=/usr/bin/hardening-systemd remove %i
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
