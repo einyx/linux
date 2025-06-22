@@ -19,6 +19,10 @@
 #include <crypto/hash.h>
 #include <crypto/sha3.h>
 #include <linux/scatterlist.h>
+#include <linux/list.h>
+#include <linux/string.h>
+#include <linux/sched.h>
+#include <linux/cred.h>
 #include "hardening.h"
 
 /* Kyber parameters for different security levels */

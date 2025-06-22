@@ -26,10 +26,14 @@
 #define PATTERN_HASH_SIZE	(1 << PATTERN_HASH_BITS)
 #define MIN_PROBABILITY		5	/* 5% minimum transition probability */
 #define ENTROPY_WINDOW		32	/* Window for entropy calculation */
+#define MAX_SYSCALLS		512	/* Maximum syscall number tracked */
+#define PROBABILITY_SCALE	1000	/* Scale factor for probability calculations */
+#define SYSCALL_SHIFT		16	/* Bit shift for combining syscalls */
+#define SYSCALL_MASK		0xFFFF	/* Mask for syscall number */
 
 static u32 calculate_transition_hash(u32 from, u32 to)
 {
-	u32 combined = (from << 16) | (to & 0xFFFF);
+	u32 combined = (from << SYSCALL_SHIFT) | (to & SYSCALL_MASK);
 	return jhash_1word(combined, 0) & (PATTERN_HASH_SIZE - 1);
 }
 
@@ -41,7 +45,7 @@ int hardening_calculate_entropy(struct hardening_behavior_profile *behavior)
 	int i;
 	
 	/* Count total syscalls in frequency table */
-	for (i = 0; i < 512; i++) {
+	for (i = 0; i < MAX_SYSCALLS; i++) {
 		total += behavior->syscall_frequency[i];
 	}
 	
@@ -49,14 +53,14 @@ int hardening_calculate_entropy(struct hardening_behavior_profile *behavior)
 		return 0;
 	
 	/* Calculate entropy: -sum(p * log2(p)) */
-	for (i = 0; i < 512; i++) {
+	for (i = 0; i < MAX_SYSCALLS; i++) {
 		u32 freq = behavior->syscall_frequency[i];
 		if (freq > 0) {
-			u32 p = (freq * 1000) / total;	/* Probability * 1000 */
+			u32 p = (freq * PROBABILITY_SCALE) / total;
 			if (p > 0) {
 				/* Approximate log2 using ilog2 */
 				u32 log_p = ilog2(p);
-				entropy += (p * log_p) / 1000;
+				entropy += (p * log_p) / PROBABILITY_SCALE;
 			}
 		}
 	}

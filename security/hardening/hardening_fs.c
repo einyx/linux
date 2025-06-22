@@ -121,6 +121,24 @@ static int hardening_status_show(struct seq_file *m, void *v)
 			seq_printf(m, "  Name: %s\n", ctx->profile->name);
 			seq_printf(m, "  ID: %u\n", ctx->profile->profile_id);
 		}
+
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM
+		if (ctx->quantum) {
+			seq_printf(m, "\nQuantum-Resistant Crypto:\n");
+			seq_printf(m, "  Authenticated: %s\n",
+				   hardening_quantum_is_authenticated(ctx) ? "yes" : "no");
+			seq_printf(m, "  Active channels: %u\n",
+				   ctx->quantum->active_channels);
+			seq_printf(m, "  Keys generated: %llu\n",
+				   ctx->quantum->keys_generated);
+			seq_printf(m, "  Signatures created: %llu\n",
+				   ctx->quantum->signatures_created);
+			seq_printf(m, "  Signatures verified: %llu\n",
+				   ctx->quantum->signatures_verified);
+			seq_printf(m, "  Key exchanges: %llu\n",
+				   ctx->quantum->key_exchanges);
+		}
+#endif
 	}
 	
 	return 0;
@@ -220,6 +238,138 @@ static const struct file_operations hardening_policy_fops = {
 	.llseek		= generic_file_llseek,
 };
 
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM
+/* Show quantum crypto status */
+static int hardening_quantum_show(struct seq_file *m, void *v)
+{
+	struct hardening_task_ctx *ctx;
+	const struct cred *cred;
+	const char *algo_names[] = {
+		"KYBER768", "KYBER1024", "DILITHIUM3", "DILITHIUM5",
+		"FALCON512", "SPHINCS+"
+	};
+	
+	cred = current_cred();
+	ctx = cred->security;
+	
+	seq_printf(m, "Quantum-Resistant Cryptography Status\n");
+	seq_printf(m, "====================================\n\n");
+	
+	if (!ctx || !ctx->quantum) {
+		seq_printf(m, "Quantum crypto not initialized for this process\n");
+		return 0;
+	}
+	
+	seq_printf(m, "Configuration:\n");
+	seq_printf(m, "  Preferred KEM: %s\n", 
+		   algo_names[ctx->quantum->preferred_kem]);
+	seq_printf(m, "  Preferred Signature: %s\n",
+		   algo_names[ctx->quantum->preferred_sig]);
+	seq_printf(m, "  Require quantum auth: %s\n",
+		   ctx->quantum->require_quantum_auth ? "yes" : "no");
+	seq_printf(m, "  Classical fallback: %s\n",
+		   ctx->quantum->allow_classical_fallback ? "yes" : "no");
+	seq_printf(m, "  Min security level: %u\n",
+		   ctx->quantum->min_security_level);
+	
+	seq_printf(m, "\nStatistics:\n");
+	seq_printf(m, "  Keys generated: %llu\n", ctx->quantum->keys_generated);
+	seq_printf(m, "  Signatures created: %llu\n", ctx->quantum->signatures_created);
+	seq_printf(m, "  Signatures verified: %llu\n", ctx->quantum->signatures_verified);
+	seq_printf(m, "  Key exchanges: %llu\n", ctx->quantum->key_exchanges);
+	seq_printf(m, "  Active channels: %u\n", ctx->quantum->active_channels);
+	
+	if (ctx->quantum->identity_key) {
+		u64 now = ktime_get_real_seconds();
+		u64 remaining = ctx->quantum->identity_key->expiration_time > now ?
+				ctx->quantum->identity_key->expiration_time - now : 0;
+		
+		seq_printf(m, "\nIdentity Key:\n");
+		seq_printf(m, "  Algorithm: %s\n",
+			   algo_names[ctx->quantum->identity_key->pq_algo]);
+		seq_printf(m, "  Expires in: %llu seconds\n", remaining);
+		seq_printf(m, "  Usage count: %u\n",
+			   ctx->quantum->identity_key->usage_count);
+	}
+	
+	return 0;
+}
+
+static int hardening_quantum_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, hardening_quantum_show, NULL);
+}
+
+/* Handle quantum crypto commands */
+static ssize_t hardening_quantum_write(struct file *file, const char __user *ubuf,
+				      size_t count, loff_t *ppos)
+{
+	struct hardening_task_ctx *ctx;
+	const struct cred *cred;
+	char *kbuf, *cmd;
+	ssize_t ret = count;
+	
+	if (count > PAGE_SIZE)
+		return -E2BIG;
+	
+	kbuf = memdup_user_nul(ubuf, count);
+	if (IS_ERR(kbuf))
+		return PTR_ERR(kbuf);
+	
+	cmd = strstrip(kbuf);
+	
+	cred = current_cred();
+	ctx = cred->security;
+	
+	if (!ctx || !ctx->quantum) {
+		pr_err("hardening: quantum crypto not initialized\n");
+		ret = -EINVAL;
+		goto out;
+	}
+	
+	if (strcmp(cmd, "rotate") == 0) {
+		ret = hardening_quantum_rotate_keys(ctx->quantum);
+		if (ret == 0) {
+			pr_info("hardening: quantum keys rotated\n");
+			ret = count;
+		}
+	} else if (strcmp(cmd, "authenticate") == 0) {
+		ret = hardening_quantum_authenticate_process(ctx);
+		if (ret == 0) {
+			pr_info("hardening: process quantum authenticated\n");
+			ret = count;
+		}
+	} else if (strncmp(cmd, "channel ", 8) == 0) {
+		u32 target_pid;
+		if (sscanf(cmd + 8, "%u", &target_pid) == 1) {
+			ret = hardening_quantum_establish_channel(ctx->quantum, target_pid);
+			if (ret == 0) {
+				pr_info("hardening: quantum channel established to PID %u\n",
+					target_pid);
+				ret = count;
+			}
+		} else {
+			ret = -EINVAL;
+		}
+	} else {
+		pr_err("hardening: unknown quantum command '%s'\n", cmd);
+		ret = -EINVAL;
+	}
+	
+out:
+	kfree(kbuf);
+	return ret;
+}
+
+static const struct file_operations hardening_quantum_fops = {
+	.open		= hardening_quantum_open,
+	.read		= seq_read,
+	.write		= hardening_quantum_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+#endif
+
 int hardening_init_securityfs(void)
 {
 	pr_info("hardening: initializing securityfs interface\n");
@@ -257,6 +407,16 @@ int hardening_init_securityfs(void)
 		goto err;
 	}
 	
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM
+	quantum_file = securityfs_create_file("quantum", 0600,
+					      hardening_dir, NULL,
+					      &hardening_quantum_fops);
+	if (IS_ERR(quantum_file)) {
+		pr_err("hardening: failed to create quantum file\n");
+		goto err;
+	}
+#endif
+	
 	pr_info("hardening: securityfs interface initialized successfully\n");
 	return 0;
 	
@@ -267,6 +427,9 @@ err:
 
 void hardening_exit_securityfs(void)
 {
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM
+	securityfs_remove(quantum_file);
+#endif
 	securityfs_remove(policy_file);
 	securityfs_remove(stats_file);
 	securityfs_remove(status_file);

@@ -28,6 +28,10 @@ static DEFINE_PER_CPU(struct hardening_net_stats, hardening_pcpu_net_stats);
 #define MAX_CONNECTIONS_PER_MINUTE	100
 #define MAX_UNIQUE_DESTINATIONS		50
 #define PORT_SCAN_THRESHOLD		20
+#define PORT_SCAN_WARNING_SCORE		5
+#define ANOMALY_SCORE_THRESHOLD		50
+#define CONNECTION_LOG_INTERVAL		0xFF	/* Log every 256 connections */
+#define MAX_PORT_NUMBER			65535
 #define MAX_FAILED_CONNECTIONS		10
 
 /* Common server ports that shouldn't be accessed by clients */
@@ -85,7 +89,7 @@ int hardening_update_network_activity(struct hardening_task_ctx *ctx,
 		stats->connections++;
 		
 		/* Periodically sync to main counter */
-		if ((stats->connections & 0xFF) == 0) {
+		if ((stats->connections & CONNECTION_LOG_INTERVAL) == 0) {
 			network->total_connections += 256;
 		}
 		
@@ -111,7 +115,7 @@ int hardening_update_network_activity(struct hardening_task_ctx *ctx,
 static void track_port_usage(struct hardening_network_profile *network,
 			     u16 port, bool is_connect)
 {
-	if (port == 0 || port >= 65536)
+	if (port == 0 || port > MAX_PORT_NUMBER)
 		return;
 		
 	/* Mark port as used */
@@ -164,7 +168,7 @@ int hardening_check_network_anomaly(struct hardening_task_ctx *ctx)
 	}
 	
 	/* Check port scanning */
-	if (network->port_scan_score > 5) {
+	if (network->port_scan_score > PORT_SCAN_WARNING_SCORE) {
 		anomaly_score += 30;
 		pr_notice("hardening: port scanning behavior detected\n");
 	}
@@ -178,7 +182,7 @@ int hardening_check_network_anomaly(struct hardening_task_ctx *ctx)
 	network->network_anomaly_score = anomaly_score;
 	
 	/* Escalate security if needed */
-	if (anomaly_score > 50 && hardening_enforce) {
+	if (anomaly_score > ANOMALY_SCORE_THRESHOLD && hardening_enforce) {
 		hardening_escalate_security(ctx);
 		atomic64_inc(&hardening_global_stats.network_anomalies);
 		return -EACCES;

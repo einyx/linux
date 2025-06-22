@@ -14,6 +14,16 @@
 #define VIOLATIONS_FOR_ESCALATION	3
 #define VIOLATIONS_FOR_CRITICAL		10
 
+/* Resource limits per security level */
+#define NORMAL_MAX_FDS			0	/* No limit */
+#define NORMAL_MAX_PROCESSES		0	/* No limit */
+#define ELEVATED_MAX_FDS		1024
+#define ELEVATED_MAX_PROCESSES		100
+#define HIGH_MAX_FDS			256
+#define HIGH_MAX_PROCESSES		50
+#define CRITICAL_MAX_FDS		64
+#define CRITICAL_MAX_PROCESSES		10
+
 static const char *security_level_names[] = {
 	[HARDENING_LEVEL_NORMAL] = "normal",
 	[HARDENING_LEVEL_ELEVATED] = "elevated",
@@ -41,8 +51,8 @@ static const struct security_level_policy level_policies[] = {
 		.block_user_namespaces = false,
 		.restrict_network = false,
 		.restrict_mount = false,
-		.max_file_descriptors = 0,	/* No limit */
-		.max_processes = 0,		/* No limit */
+		.max_file_descriptors = NORMAL_MAX_FDS,
+		.max_processes = NORMAL_MAX_PROCESSES,
 	},
 	[HARDENING_LEVEL_ELEVATED] = {
 		.denied_capabilities = CAP_TO_MASK(CAP_SYS_MODULE) |
@@ -52,8 +62,8 @@ static const struct security_level_policy level_policies[] = {
 		.block_user_namespaces = false,
 		.restrict_network = false,
 		.restrict_mount = true,
-		.max_file_descriptors = 1024,
-		.max_processes = 100,
+		.max_file_descriptors = ELEVATED_MAX_FDS,
+		.max_processes = ELEVATED_MAX_PROCESSES,
 	},
 	[HARDENING_LEVEL_HIGH] = {
 		.denied_capabilities = CAP_TO_MASK(CAP_SYS_MODULE) |
@@ -65,8 +75,8 @@ static const struct security_level_policy level_policies[] = {
 		.block_user_namespaces = true,
 		.restrict_network = true,
 		.restrict_mount = true,
-		.max_file_descriptors = 256,
-		.max_processes = 50,
+		.max_file_descriptors = HIGH_MAX_FDS,
+		.max_processes = HIGH_MAX_PROCESSES,
 	},
 	[HARDENING_LEVEL_CRITICAL] = {
 		.denied_capabilities = ~0U,	/* Deny all capabilities */
@@ -75,8 +85,8 @@ static const struct security_level_policy level_policies[] = {
 		.block_user_namespaces = true,
 		.restrict_network = true,
 		.restrict_mount = true,
-		.max_file_descriptors = 64,
-		.max_processes = 10,
+		.max_file_descriptors = CRITICAL_MAX_FDS,
+		.max_processes = CRITICAL_MAX_PROCESSES,
 	},
 };
 
