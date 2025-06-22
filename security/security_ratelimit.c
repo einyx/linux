@@ -16,6 +16,7 @@
 #include <linux/timer.h>
 #include <linux/workqueue.h>
 #include <linux/security.h>
+#include "security_ratelimit.h"
 
 #define SECURITY_RATELIMIT_BUCKETS	256
 #define SECURITY_RATELIMIT_INTERVAL	(HZ * 5)	/* 5 seconds */

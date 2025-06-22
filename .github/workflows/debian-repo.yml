@@ -1,0 +1,315 @@
+name: Debian Repository
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            debhelper \
+            devscripts \
+            dpkg-dev \
+            reprepro \
+            gnupg \
+            kernel-package \
+            libssl-dev \
+            libelf-dev \
+            bc \
+            bison \
+            flex
+
+      - name: Setup GPG key for signing
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+            echo "GPG key imported"
+          else
+            # Create a temporary key for CI if no key provided
+            cat >gpg-batch <<EOF
+          %echo Generating GPG key for package signing
+          %no-protection
+          Key-Type: RSA
+          Key-Length: 2048
+          Subkey-Type: RSA
+          Subkey-Length: 2048
+          Name-Real: Kain Kernel CI
+          Name-Email: ci@kain-kernel.local
+          Expire-Date: 1y
+          %commit
+          %echo done
+          EOF
+            gpg --batch --generate-key gpg-batch
+            rm gpg-batch
+          fi
+
+      - name: Configure kernel version
+        id: version
+        run: |
+          # Get version from git tag or use dev version
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="$(make kernelversion)-dev$(date +%Y%m%d)-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building kernel version: $VERSION"
+
+      - name: Build kernel packages
+        run: |
+          # Configure kernel
+          make defconfig
+          ./scripts/config --enable CONFIG_HARDENED_USERCOPY
+          ./scripts/config --disable CONFIG_DRM_I915
+          make olddefconfig
+          
+          # Build Debian packages
+          make -j$(nproc) deb-pkg LOCALVERSION=-kain KDEB_PKGVERSION=${{ steps.version.outputs.version }}
+
+      - name: Collect packages
+        run: |
+          mkdir -p debian-packages
+          mv ../*.deb debian-packages/
+          ls -la debian-packages/
+
+      - name: Upload packages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-packages
+          path: debian-packages/
+          retention-days: 7
+
+  create-repository:
+    needs: build-packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-packages
+          path: packages/
+
+      - name: Install repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y reprepro gnupg
+
+      - name: Setup GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+            GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          else
+            # Use temporary key
+            cat >gpg-batch <<EOF
+          %echo Generating GPG key
+          %no-protection
+          Key-Type: RSA
+          Key-Length: 2048
+          Name-Real: Kain Kernel CI
+          Name-Email: ci@kain-kernel.local
+          Expire-Date: 1y
+          %commit
+          %echo done
+          EOF
+            gpg --batch --generate-key gpg-batch
+            rm gpg-batch
+            GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          fi
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+          
+          # Export public key
+          gpg --armor --export $GPG_KEY_ID > repo-key.asc
+
+      - name: Create repository structure
+        run: |
+          mkdir -p repo/conf
+          mkdir -p repo/dists
+          mkdir -p repo/pool
+
+          # Create distributions file
+          cat > repo/conf/distributions <<EOF
+          Origin: Kain Kernel
+          Label: Kain Kernel
+          Codename: stable
+          Architectures: amd64 arm64
+          Components: main
+          Description: Kain Kernel Debian Repository
+          SignWith: $GPG_KEY_ID
+          
+          Origin: Kain Kernel
+          Label: Kain Kernel
+          Codename: testing
+          Architectures: amd64 arm64
+          Components: main
+          Description: Kain Kernel Testing Repository
+          SignWith: $GPG_KEY_ID
+          EOF
+
+          # Create options file
+          cat > repo/conf/options <<EOF
+          verbose
+          ask-passphrase
+          basedir .
+          EOF
+
+      - name: Add packages to repository
+        run: |
+          cd repo
+          
+          # Determine target distribution
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            DIST="stable"
+          else
+            DIST="testing"
+          fi
+          
+          # Add all packages
+          for deb in ../packages/*.deb; do
+            reprepro includedeb $DIST "$deb"
+          done
+          
+          # Copy public key to repo root
+          cp ../repo-key.asc ./
+
+      - name: Create repository documentation
+        run: |
+          cat > repo/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Kain Kernel Debian Repository</title>
+              <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+                  pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+                  code { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; }
+                  .warning { background: #fff3cd; border: 1px solid #ffeeba; padding: 10px; border-radius: 5px; margin: 10px 0; }
+              </style>
+          </head>
+          <body>
+              <h1>Kain Kernel Debian Repository</h1>
+              
+              <p>This repository contains Debian packages for the Kain kernel.</p>
+              
+              <h2>Quick Setup</h2>
+              
+              <p>Add this repository to your system:</p>
+              
+              <pre><code># Download and add the GPG key
+wget -qO - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo-key.asc | sudo apt-key add -
+
+# Add the repository
+echo "deb https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/ stable main" | sudo tee /etc/apt/sources.list.d/kain-kernel.list
+
+# Update package list
+sudo apt update
+
+# Install kernel packages
+sudo apt install linux-image-kain linux-headers-kain</code></pre>
+              
+              <h2>Available Distributions</h2>
+              
+              <ul>
+                  <li><code>stable</code> - Production releases</li>
+                  <li><code>testing</code> - Development builds</li>
+              </ul>
+              
+              <h2>Manual Package Download</h2>
+              
+              <p>Browse packages: <a href="pool/">pool/</a></p>
+              
+              <h2>Repository Key</h2>
+              
+              <p>GPG key: <a href="repo-key.asc">repo-key.asc</a></p>
+              
+              <div class="warning">
+                  <strong>Note:</strong> This is an automated repository. For production use, verify package signatures and test thoroughly.
+              </div>
+          </body>
+          </html>
+          EOF
+
+          # Create apt setup script
+          cat > repo/setup.sh <<'EOF'
+          #!/bin/bash
+          set -e
+          
+          echo "Setting up Kain Kernel repository..."
+          
+          # Add GPG key
+          wget -qO - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo-key.asc | sudo apt-key add -
+          
+          # Add repository
+          echo "deb https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/ stable main" | sudo tee /etc/apt/sources.list.d/kain-kernel.list
+          
+          # Update package list
+          sudo apt update
+          
+          echo "Repository added successfully!"
+          echo "Install kernel with: sudo apt install linux-image-kain linux-headers-kain"
+          EOF
+          
+          chmod +x repo/setup.sh
+
+      - name: Upload repository artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-repository
+          path: repo/
+          retention-days: 1
+
+  deploy:
+    needs: create-repository
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download repository
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-repository
+          path: ./
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload to Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

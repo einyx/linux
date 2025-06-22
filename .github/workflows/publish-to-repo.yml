@@ -1,0 +1,145 @@
+name: Publish to APT Repository
+
+on:
+  workflow_run:
+    workflows: ["Build DEB and RPM packages"]
+    types:
+      - completed
+    branches: [main]
+
+jobs:
+  publish-apt:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/github-script@v7
+      with:
+        script: |
+          let allArtifacts = await github.rest.actions.listWorkflowRunArtifacts({
+             owner: context.repo.owner,
+             repo: context.repo.repo,
+             run_id: ${{ github.event.workflow_run.id }},
+          });
+          let matchArtifacts = allArtifacts.data.artifacts.filter((artifact) => {
+            return artifact.name.startsWith("deb-packages-");
+          });
+          let fs = require('fs');
+          for (const artifact of matchArtifacts) {
+            let download = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: artifact.id,
+              archive_format: 'zip',
+            });
+            fs.writeFileSync('${{github.workspace}}/' + artifact.name + '.zip', Buffer.from(download.data));
+          }
+    
+    - name: Extract packages
+      run: |
+        for zip in *.zip; do
+          unzip "$zip"
+        done
+        find . -name "*.deb" -type f
+    
+    - name: Setup repository tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y dpkg-dev apt-utils
+    
+    - name: Create repository structure
+      run: |
+        mkdir -p repo/{pool/main,dists/stable/main/binary-{amd64,arm64}}
+        
+        # Move packages to pool
+        find . -name "*.deb" -exec cp {} repo/pool/main/ \;
+    
+    - name: Generate repository metadata
+      run: |
+        cd repo
+        
+        # Generate Packages files
+        dpkg-scanpackages pool/main > dists/stable/main/binary-amd64/Packages
+        gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+        
+        # Generate Release file
+        cd dists/stable
+        {
+          echo "Origin: Kain Community Kernel"
+          echo "Label: Kain Community Kernel"
+          echo "Suite: stable"
+          echo "Codename: stable"
+          echo "Version: 1.0"
+          echo "Architectures: amd64 arm64"
+          echo "Components: main"
+          echo "Description: Community-driven security-focused Linux kernel"
+          echo "Date: $(date -R)"
+        } > Release
+        
+        # Add checksums
+        echo "MD5Sum:" >> Release
+        find main -type f -name "Packages*" -exec md5sum {} \; | sed 's|  | |' >> Release
+        echo "SHA256:" >> Release  
+        find main -type f -name "Packages*" -exec sha256sum {} \; | sed 's|  | |' >> Release
+    
+    - name: Upload to repository server
+      env:
+        REPO_HOST: ${{ secrets.REPO_HOST }}
+        REPO_USER: ${{ secrets.REPO_USER }}
+        REPO_KEY: ${{ secrets.REPO_SSH_KEY }}
+      run: |
+        # This is a placeholder - in production you would:
+        # 1. Setup SSH key
+        # 2. Rsync to your repository server
+        # 3. Run repository update scripts
+        
+        echo "Would upload to repository server here"
+        
+        # Example:
+        # echo "$REPO_KEY" > repo_key
+        # chmod 600 repo_key
+        # rsync -avz -e "ssh -i repo_key -o StrictHostKeyChecking=no" \
+        #   repo/ ${REPO_USER}@${REPO_HOST}:/var/www/html/kain/
+    
+    - name: Update repository index
+      run: |
+        # Create an index of available packages for the website
+        cat > package-index.json << EOF
+        {
+          "last_updated": "$(date -Iseconds)",
+          "packages": [
+        EOF
+        
+        first=true
+        for deb in repo/pool/main/*.deb; do
+          if [ -f "$deb" ]; then
+            pkg_name=$(dpkg-deb -f "$deb" Package)
+            pkg_version=$(dpkg-deb -f "$deb" Version)
+            pkg_arch=$(dpkg-deb -f "$deb" Architecture)
+            pkg_size=$(stat -c%s "$deb")
+            
+            if [ "$first" = true ]; then
+              first=false
+            else
+              echo "," >> package-index.json
+            fi
+            
+            printf '    {\n' >> package-index.json
+            printf '      "name": "%s",\n' "$pkg_name" >> package-index.json
+            printf '      "version": "%s",\n' "$pkg_version" >> package-index.json
+            printf '      "architecture": "%s",\n' "$pkg_arch" >> package-index.json
+            printf '      "size": %s,\n' "$pkg_size" >> package-index.json
+            printf '      "filename": "%s",\n' "$(basename $deb)" >> package-index.json
+            printf '      "sha256": "%s"\n' "$(sha256sum $deb | cut -d' ' -f1)" >> package-index.json
+            printf '    }' >> package-index.json
+          fi
+        done
+        
+        echo -e "\n  ]\n}" >> package-index.json
+    
+    - name: Upload package index
+      uses: actions/upload-artifact@v4
+      with:
+        name: package-index
+        path: package-index.json

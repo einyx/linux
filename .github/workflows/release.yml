@@ -1,0 +1,179 @@
+name: Release Management
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Determine version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "push" ]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+        else
+          # Calculate next version based on input
+          CURRENT=$(git describe --tags --abbrev=0 || echo "v0.0.0")
+          MAJOR=$(echo $CURRENT | cut -d. -f1 | sed 's/v//')
+          MINOR=$(echo $CURRENT | cut -d. -f2)
+          PATCH=$(echo $CURRENT | cut -d. -f3)
+          
+          case "${{ inputs.release_type }}" in
+            major)
+              VERSION="v$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              VERSION="v${MAJOR}.$((MINOR + 1)).0"
+              ;;
+            patch)
+              VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+              ;;
+          esac
+        fi
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: Generate changelog
+      run: |
+        # Generate changelog since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ || echo "")
+        
+        cat > CHANGELOG.md << EOF
+        # Release ${{ steps.version.outputs.version }}
+        
+        ## Changes
+        
+        EOF
+        
+        # Group commits by type
+        git log ${LAST_TAG}..HEAD --pretty=format:"%s (%h)" | while read line; do
+          if [[ $line == fix:* ]]; then
+            echo "- 🐛 $line" >> CHANGELOG.md
+          elif [[ $line == feat:* ]]; then
+            echo "- ✨ $line" >> CHANGELOG.md
+          elif [[ $line == security:* ]]; then
+            echo "- 🔒 $line" >> CHANGELOG.md
+          else
+            echo "- $line" >> CHANGELOG.md
+          fi
+        done
+        
+        echo "" >> CHANGELOG.md
+        echo "## Contributors" >> CHANGELOG.md
+        git log ${LAST_TAG}..HEAD --pretty=format:"- %an" | sort -u >> CHANGELOG.md
+    
+    - name: Upload changelog
+      uses: actions/upload-artifact@v4
+      with:
+        name: changelog
+        path: CHANGELOG.md
+
+  build-release:
+    needs: prepare-release
+    uses: ./.github/workflows/package.yml
+
+  create-release:
+    needs: [prepare-release, build-release]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+    
+    - name: Create release notes
+      run: |
+        cat > RELEASE_NOTES.md << EOF
+        # Linux Community Kernel ${{ needs.prepare-release.outputs.version }}
+        
+        ## Installation
+        
+        ### Debian/Ubuntu
+        \`\`\`bash
+        wget https://github.com/einyx/linux/releases/download/${{ needs.prepare-release.outputs.version }}/linux-image-${{ needs.prepare-release.outputs.version }}-amd64.deb
+        sudo dpkg -i linux-image-*.deb
+        \`\`\`
+        
+        ### Fedora/RHEL
+        \`\`\`bash
+        wget https://github.com/einyx/linux/releases/download/${{ needs.prepare-release.outputs.version }}/kernel-${{ needs.prepare-release.outputs.version }}-x86_64.rpm
+        sudo rpm -i kernel-*.rpm
+        \`\`\`
+        
+        ## Changes
+        
+        EOF
+        
+        cat changelog/CHANGELOG.md >> RELEASE_NOTES.md
+        
+        echo "" >> RELEASE_NOTES.md
+        echo "## Checksums" >> RELEASE_NOTES.md
+        echo "\`\`\`" >> RELEASE_NOTES.md
+        sha256sum */linux-* */kernel-* >> RELEASE_NOTES.md || true
+        echo "\`\`\`" >> RELEASE_NOTES.md
+    
+    - name: Create GitHub release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ needs.prepare-release.outputs.version }}
+        name: ${{ needs.prepare-release.outputs.version }}
+        body_path: RELEASE_NOTES.md
+        draft: false
+        prerelease: false
+        files: |
+          deb-packages-*/*.deb
+          rpm-packages-*/*.rpm
+    
+    - name: Update stable branch
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        
+        # Update stable branch
+        git checkout -b stable || git checkout stable
+        git merge --ff-only ${{ needs.prepare-release.outputs.version }}
+        git push origin stable
+
+  announce-release:
+    needs: [prepare-release, create-release]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Announce on Discord
+      run: |
+        # TODO: Add Discord webhook
+        echo "Release ${{ needs.prepare-release.outputs.version }} announced"
+    
+    - name: Update website
+      run: |
+        # TODO: Update download links on website
+        echo "Website updated with new release"
+    
+    - name: Send to mailing list
+      run: |
+        # TODO: Send announcement email
+        echo "Mailing list notified"

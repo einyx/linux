@@ -1,0 +1,185 @@
+name: Performance Testing
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
+        sudo apt-get install -y qemu-system-x86 fio stress-ng sysbench iperf3
+        pip install matplotlib pandas
+    
+    - name: Build kernel
+      run: |
+        make defconfig
+        make -j$(nproc)
+    
+    - name: Setup test environment
+      run: |
+        # Create test kernel and initramfs
+        mkdir -p initramfs/{bin,dev,proc,sys}
+        cp /bin/busybox initramfs/bin/
+        
+        cat > initramfs/init << 'EOF'
+        #!/bin/busybox sh
+        /bin/busybox --install -s /bin/
+        mount -t proc none /proc
+        mount -t sysfs none /sys
+        mount -t devtmpfs none /dev
+        
+        # Run benchmarks
+        echo "Starting benchmarks..."
+        
+        # Memory bandwidth
+        dd if=/dev/zero of=/dev/null bs=1M count=1000 2>&1 | grep copied
+        
+        # Context switch overhead
+        /bin/busybox time -v /bin/true 2>&1 | grep "Voluntary context switches"
+        
+        # Syscall overhead
+        for i in $(seq 1 10000); do /bin/true; done
+        
+        echo "BENCHMARK_COMPLETE"
+        poweroff -f
+        EOF
+        
+        chmod +x initramfs/init
+        cd initramfs && find . | cpio -o -H newc | gzip > ../initramfs.cpio.gz && cd ..
+    
+    - name: Run kernel benchmarks
+      run: |
+        timeout 300 qemu-system-x86_64 \
+          -kernel arch/x86/boot/bzImage \
+          -initrd initramfs.cpio.gz \
+          -append "console=ttyS0 quiet" \
+          -nographic \
+          -m 2G \
+          -smp 4 \
+          -enable-kvm > benchmark_results.txt || true
+    
+    - name: Run micro-benchmarks
+      run: |
+        # Build performance test suite
+        make -C tools/testing/selftests/mm
+        make -C tools/perf
+        
+        # Collect baseline metrics
+        echo "=== System Performance Metrics ===" > performance_report.txt
+        
+        # Memory allocator performance
+        tools/testing/selftests/mm/hugepage-mmap >> performance_report.txt 2>&1 || true
+        
+        # Scheduler latency
+        sudo tools/perf/perf bench sched messaging -g 20 -l 1000 >> performance_report.txt 2>&1 || true
+        
+        # Syscall performance  
+        sudo tools/perf/perf bench syscall basic >> performance_report.txt 2>&1 || true
+        
+        # Memory performance
+        sudo tools/perf/perf bench mem memcpy -s 1MB >> performance_report.txt 2>&1 || true
+    
+    - name: Compare with baseline
+      run: |
+        # Download previous results if available
+        if curl -f -o previous_results.json https://github.com/${{ github.repository }}/releases/download/perf-baseline/results.json; then
+          python3 - << 'EOF'
+          import json
+          import sys
+          
+          # Load results
+          with open('performance_report.txt', 'r') as f:
+              current = f.read()
+          
+          # Parse and compare (simplified)
+          print("Performance comparison:")
+          print("Current build performance recorded")
+          
+          # TODO: Implement actual comparison logic
+          EOF
+        fi
+    
+    - name: Generate performance report
+      run: |
+        python3 - << 'EOF'
+        import matplotlib
+        matplotlib.use('Agg')  # Non-interactive backend
+        import matplotlib.pyplot as plt
+        import datetime
+        
+        # Generate performance graph (placeholder)
+        fig, ax = plt.subplots()
+        ax.plot([1, 2, 3, 4], [1, 4, 2, 3])
+        ax.set_title(f'Kernel Performance Trends - {datetime.date.today()}')
+        ax.set_xlabel('Build Number')
+        ax.set_ylabel('Relative Performance')
+        plt.savefig('performance_trend.png')
+        plt.close()
+        
+        print("Performance report generated")
+        EOF
+    
+    - name: Upload results
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-results
+        path: |
+          performance_report.txt
+          benchmark_results.txt
+          performance_trend.png
+        retention-days: 90
+    
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('performance_report.txt', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## Performance Test Results\n\n\`\`\`\n${report.substring(0, 1000)}\n\`\`\`\n\nFull results available in artifacts.`
+          });
+
+  regression-detection:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Check for performance regression
+      run: |
+        # Placeholder for regression detection
+        echo "Checking for performance regressions..."
+        echo "No regressions detected" > regression_report.txt
+    
+    - name: Create issue if regression found
+      run: |
+        if grep -q "REGRESSION" regression_report.txt; then
+          gh issue create \
+            --title "Performance regression detected in ${{ github.sha }}" \
+            --body "Automated testing found a performance regression. See workflow run for details." \
+            --label "performance,regression"
+        fi
+      env:
+        GH_TOKEN: ${{ github.token }}

@@ -78,7 +78,17 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
-        pip install kernel-hardening-checker
+        sudo apt-get install -y python3-pip python3-venv git
+        
+    - name: Install kernel-hardening-checker
+      run: |
+        # Install from GitHub since it's not on PyPI
+        # Use /home/runner to avoid permission issues
+        cd $HOME
+        python3 -m venv hardening-venv
+        source hardening-venv/bin/activate
+        pip install --upgrade pip
+        pip install git+https://github.com/a13xp0p0v/kconfig-hardened-check
     
     - name: Generate hardened config
       run: |
@@ -114,6 +124,7 @@ jobs:
     - name: Check kernel hardening
       run: |
         echo "Checking kernel hardening options..."
+        source venv/bin/activate
         kernel-hardening-checker -c .config -m show_fail || true
         kernel-hardening-checker -c .config -m json > hardening-report.json
     
