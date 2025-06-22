@@ -22,8 +22,8 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y cppcheck sparse coccinelle smatch
-        sudo apt-get install -y clang clang-tools
-        pip install semgrep
+        sudo apt-get install -y clang clang-tools python3-pip
+        pip3 install --user semgrep
     
     - name: Run Coccinelle semantic patches
       run: |
@@ -69,6 +69,9 @@ jobs:
 
   kernel-hardening-check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     
     steps:
     - name: Checkout code
@@ -124,7 +127,7 @@ jobs:
     - name: Check kernel hardening
       run: |
         echo "Checking kernel hardening options..."
-        source venv/bin/activate
+        source $HOME/hardening-venv/bin/activate
         kernel-hardening-checker -c .config -m show_fail || true
         kernel-hardening-checker -c .config -m json > hardening-report.json
     
