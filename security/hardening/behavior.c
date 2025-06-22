@@ -187,37 +187,55 @@ int hardening_update_behavior(struct hardening_task_ctx *ctx, int syscall_nr)
 	
 	spin_lock_irqsave(&behavior->lock, flags);
 	
-	/* Get previous syscall for Markov chain update */
-	if (behavior->pattern_index > 0) {
-		prev_syscall = behavior->syscall_pattern[behavior->pattern_index - 1];
-	} else if (behavior->total_transitions > 0) {
-		prev_syscall = behavior->syscall_pattern[HARDENING_BEHAVIOR_WINDOW - 1];
-	} else {
-		prev_syscall = 0;
+	/* Add syscall to batch */
+	behavior->syscall_batch[behavior->batch_count++] = syscall_nr;
+	
+	/* Process batch when full */
+	if (behavior->batch_count >= SYSCALL_BATCH_SIZE) {
+		int i;
+		
+		for (i = 0; i < behavior->batch_count; i++) {
+			u32 batch_syscall = behavior->syscall_batch[i];
+			
+			/* Get previous syscall for Markov chain update */
+			if (behavior->pattern_index > 0) {
+				prev_syscall = behavior->syscall_pattern[behavior->pattern_index - 1];
+			} else if (behavior->total_transitions > 0) {
+				prev_syscall = behavior->syscall_pattern[HARDENING_BEHAVIOR_WINDOW - 1];
+			} else {
+				prev_syscall = 0;
+			}
+			
+			/* Store syscall in circular buffer */
+			old_syscall = behavior->syscall_pattern[behavior->pattern_index];
+			behavior->syscall_pattern[behavior->pattern_index] = batch_syscall;
+			behavior->pattern_index = (behavior->pattern_index + 1) % 
+					  HARDENING_BEHAVIOR_WINDOW;
+			
+			/* Update syscall frequency */
+			if (batch_syscall < 512)
+				behavior->syscall_frequency[batch_syscall]++;
+				
+			/* Update Markov chain for batch */
+			if (i > 0 && prev_syscall != 0) {
+				spin_unlock_irqrestore(&behavior->lock, flags);
+				hardening_update_markov_chain(behavior, 
+					behavior->syscall_batch[i-1], batch_syscall);
+				spin_lock_irqsave(&behavior->lock, flags);
+			}
+		}
+		
+		/* Reset batch */
+		behavior->batch_count = 0;
+		
+		/* Update timestamp */
+		behavior->last_update = ktime_get_ns();
 	}
-	
-	/* Store syscall in circular buffer */
-	old_syscall = behavior->syscall_pattern[behavior->pattern_index];
-	behavior->syscall_pattern[behavior->pattern_index] = syscall_nr;
-	behavior->pattern_index = (behavior->pattern_index + 1) % 
-				  HARDENING_BEHAVIOR_WINDOW;
-	
-	/* Update syscall frequency */
-	if (syscall_nr < 512)
-		behavior->syscall_frequency[syscall_nr]++;
-	
-	/* Update timestamp */
-	behavior->last_update = ktime_get_ns();
 	
 	spin_unlock_irqrestore(&behavior->lock, flags);
 	
-	/* Update Markov chain if we have a previous syscall */
-	if (behavior->total_transitions > 0 && prev_syscall != 0) {
-		hardening_update_markov_chain(behavior, prev_syscall, syscall_nr);
-	}
-	
-	/* Check for anomalies if we have enough data */
-	if (behavior->pattern_index == 0) {
+	/* Only check for anomalies when batch is processed */
+	if (behavior->batch_count == 0 && behavior->pattern_index == 0) {
 		hardening_check_anomaly(ctx);
 	}
 	

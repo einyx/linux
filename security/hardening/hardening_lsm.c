@@ -285,14 +285,26 @@ static int hardening_file_permission(struct file *file, int mask)
 {
 	struct hardening_task_ctx *ctx;
 	const struct cred *cred;
-
+	u64 now;
+	
 	if (!hardening_enabled)
+		return 0;
+
+	/* Fast path: skip checks for kernel threads */
+	if (current->flags & PF_KTHREAD)
 		return 0;
 
 	cred = current_cred();
 	ctx = cred->security;
 	if (!ctx)
 		return 0;
+
+	/* Fast path: only perform expensive checks periodically */
+	now = ktime_get_ns();
+	if (now - ctx->last_resource_check < NSEC_PER_SEC / 10) /* 100ms interval */
+		return 0;
+	
+	ctx->last_resource_check = now;
 
 	/* Update resource usage periodically */
 	hardening_update_resources(ctx);

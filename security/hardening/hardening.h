@@ -67,6 +67,11 @@ struct hardening_behavior_profile {
 	u32 pattern_entropy;
 	u32 sequence_complexity;
 	
+	/* Batch optimization */
+	#define SYSCALL_BATCH_SIZE 16
+	u32 syscall_batch[SYSCALL_BATCH_SIZE];
+	u8 batch_count;
+	
 	spinlock_t lock;
 };
 
@@ -252,6 +257,10 @@ struct hardening_task_ctx {
 	/* Entropy pool for randomization */
 	u32 entropy_pool;
 	u32 random_seed;
+	
+	/* Performance optimization */
+	u64 last_resource_check;
+	u64 last_behavior_check;
 	
 	/* General */
 	u32 flags;

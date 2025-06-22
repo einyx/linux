@@ -10,8 +10,19 @@
 #include <linux/socket.h>
 #include <linux/net.h>
 #include <linux/inet.h>
+#include <linux/percpu.h>
 #include <net/sock.h>
 #include "hardening.h"
+
+/* Per-CPU network statistics for performance */
+struct hardening_net_stats {
+	u64 connections;
+	u64 bytes_sent;
+	u64 bytes_received;
+	u64 packets;
+};
+
+static DEFINE_PER_CPU(struct hardening_net_stats, hardening_pcpu_net_stats);
 
 /* Network anomaly thresholds */
 #define MAX_CONNECTIONS_PER_MINUTE	100
@@ -65,9 +76,18 @@ int hardening_update_network_activity(struct hardening_task_ctx *ctx,
 	network = ctx->network;
 	now = ktime_get_ns();
 	
-	/* Update connection statistics */
+	/* Update connection statistics using per-CPU counters */
 	if (sock_type == SOCK_STREAM || sock_type == SOCK_DGRAM) {
-		network->total_connections++;
+		struct hardening_net_stats *stats;
+		
+		/* Use per-CPU counter for performance */
+		stats = this_cpu_ptr(&hardening_pcpu_net_stats);
+		stats->connections++;
+		
+		/* Periodically sync to main counter */
+		if ((stats->connections & 0xFF) == 0) {
+			network->total_connections += 256;
+		}
 		
 		if (result < 0)
 			network->failed_connections++;
