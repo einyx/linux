@@ -29,11 +29,16 @@ A comprehensive Linux Security Module (LSM) that provides innovative security fe
 - Container escape pattern recognition
 - Fork bomb detection
 
-### 5. Container-Aware Security
-- Automatic container detection
-- Container-specific policies
-- Runtime identification (Docker, containerd, runc)
-- Enhanced isolation enforcement
+### 5. Container-Aware Security with Docker Integration
+- Automatic container runtime detection (Docker, containerd, Podman, K8s)
+- Container-specific capability restrictions
+- Docker socket access protection
+- Container escape detection and prevention
+- Filesystem and mount restrictions
+- Network isolation enforcement
+- Inter-container communication control
+- Resource limit enforcement
+- Integration with seccomp filters
 
 ### 6. Network Behavior Profiling
 - Connection rate monitoring
@@ -160,10 +165,45 @@ echo 0 > /proc/sys/kernel/hardening/enforce
 2. Monitor logs for policy violations
 3. Gradually enable enforcement once policies are tuned
 
+## Docker/Container Integration
+
+The Hardening LSM provides deep integration with Docker and container runtimes:
+
+### Container Security Features
+- **Automatic Detection**: Identifies containers via cgroups and namespaces
+- **Runtime Support**: Docker, containerd, Podman, Kubernetes
+- **Capability Restrictions**: Blocks dangerous capabilities (SYS_ADMIN, SYS_MODULE, etc.)
+- **Escape Prevention**: Detects and blocks container escape attempts
+- **Docker Socket Protection**: Restricts access to Docker API
+- **Network Isolation**: Controls container-to-host and container-to-container communication
+
+### Quick Start for Docker Security
+```bash
+# Enable container security
+echo 1 > /sys/kernel/security/hardening/container_enabled
+
+# Set strict isolation
+echo 2 > /sys/kernel/security/hardening/container_isolation
+
+# Load Docker policy
+cat /etc/hardening/docker-policy.yaml > /sys/kernel/security/hardening/policy
+```
+
+### Example: Secure Container Launch
+```bash
+# Container with LSM protection (dangerous operations blocked)
+docker run --rm --cap-drop=ALL --cap-add=NET_BIND_SERVICE nginx
+
+# Even privileged containers are restricted
+docker run --rm --privileged alpine modprobe dummy  # Blocked by LSM
+```
+
+For detailed Docker integration documentation, see [docs/docker-integration.md](docs/docker-integration.md).
+
 ## Future Enhancements
 
 - Machine learning models for better anomaly detection
 - Integration with IMA/EVM for integrity verification
-- Network traffic pattern analysis
-- Container-specific policies
+- Enhanced container runtime integration (CRI-O, rkt)
+- eBPF-based syscall filtering for containers
 - Per-application security profiles
