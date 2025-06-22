@@ -56,7 +56,8 @@ static int calculate_deviation(u64 baseline, u64 current_val)
 	if (baseline == 0)
 		return current_val > 0 ? 100 : 0;
 		
-	diff = current_val > baseline ? current_val - baseline : baseline - current_val;
+	diff = current_val > baseline ? current_val - baseline :
+	       baseline - current_val;
 	return (diff * 100) / baseline;
 }
 

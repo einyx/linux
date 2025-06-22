@@ -110,7 +110,8 @@ u32 hardening_get_random(struct hardening_task_ctx *ctx)
 }
 
 /* Make randomized security decision */
-int hardening_randomize_decision(struct hardening_task_ctx *ctx, int probability)
+int hardening_randomize_decision(struct hardening_task_ctx *ctx,
+				 int probability)
 {
 	u32 random_val;
 	u32 threshold;

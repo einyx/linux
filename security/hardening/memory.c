@@ -18,7 +18,8 @@
 
 /* Forward declarations */
 static bool detect_rop_chain(unsigned long addr, size_t len);
-static bool detect_stack_pivot(struct hardening_memory_profile *memory, unsigned long addr);
+static bool detect_stack_pivot(struct hardening_memory_profile *memory,
+			       unsigned long addr);
 
 /* Memory operation types */
 #define MEM_OP_MMAP		1

@@ -20,3 +20,4 @@ hardening-$(CONFIG_SECURITY_HARDENING_SYSCALL_FILTER) += syscall_filter.o
 hardening-$(CONFIG_SECURITY_HARDENING_PROFILES) += profiles.o
 hardening-$(CONFIG_SECURITY_HARDENING_CRYPTO) += crypto.o
 hardening-$(CONFIG_SECURITY_HARDENING_STATS) += stats.o
+hardening-$(CONFIG_SECURITY_HARDENING_QUANTUM) += quantum.o

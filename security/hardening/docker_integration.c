@@ -63,7 +63,8 @@ static const int dangerous_caps[] = {
 };
 
 /* Forward declarations */
-static int check_inter_container_comm(struct socket *sock, struct sockaddr *address);
+static int check_inter_container_comm(struct socket *sock,
+				      struct sockaddr *address);
 
 /**
  * detect_container_runtime - Detect which container runtime is in use
@@ -71,7 +72,8 @@ static int check_inter_container_comm(struct socket *sock, struct sockaddr *addr
  *
  * Returns: container runtime type
  */
-static enum container_runtime_type detect_container_runtime(struct hardening_task_ctx *ctx)
+static enum container_runtime_type
+detect_container_runtime(struct hardening_task_ctx *ctx)
 {
 	struct cgroup *cgrp;
 	char *path;

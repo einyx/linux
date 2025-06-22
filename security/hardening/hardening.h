@@ -277,6 +277,9 @@ struct hardening_task_ctx {
 	/* Cryptographic context */
 	struct hardening_crypto_ctx *crypto;
 	
+	/* Quantum-resistant crypto context */
+	struct hardening_quantum_ctx *quantum;
+	
 	/* Security profile */
 	struct hardening_security_profile *profile;
 	
@@ -304,6 +307,117 @@ struct hardening_task_ctx {
 #define HARDENING_FLAG_BEHAVIOR_CHECK	0x00000004
 #define HARDENING_FLAG_RESOURCE_CHECK	0x00000008
 
+/* Quantum-Resistant Cryptography structures */
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM
+
+/* Post-quantum algorithm types */
+enum hardening_pq_algo {
+	HARDENING_PQ_KYBER768,		/* NIST Level 3 security */
+	HARDENING_PQ_KYBER1024,		/* NIST Level 5 security */
+	HARDENING_PQ_DILITHIUM3,	/* Digital signatures */
+	HARDENING_PQ_DILITHIUM5,	/* Higher security signatures */
+	HARDENING_PQ_FALCON512,		/* Alternative signature scheme */
+	HARDENING_PQ_SPHINCS_PLUS,	/* Hash-based signatures */
+};
+
+/* Hybrid key structure (classical + quantum) */
+struct hardening_hybrid_key {
+	/* Classical component */
+	u8 classical_key[32];		/* AES-256 or similar */
+	u32 classical_key_len;
+	
+	/* Quantum-resistant component */
+	u8 *pq_public_key;
+	u8 *pq_private_key;
+	u32 pq_public_key_len;
+	u32 pq_private_key_len;
+	enum hardening_pq_algo pq_algo;
+	
+	/* Key metadata */
+	u64 creation_time;
+	u64 expiration_time;
+	u32 usage_count;
+	bool is_ephemeral;
+};
+
+/* Quantum-secure channel */
+struct hardening_quantum_channel {
+	struct hardening_hybrid_key *local_key;
+	struct hardening_hybrid_key *remote_key;
+	
+	/* Shared secrets */
+	u8 shared_secret[64];		/* Combined classical + PQ */
+	u8 session_key[32];		/* Derived session key */
+	
+	/* Channel state */
+	u64 sequence_number;
+	u64 last_rekey_time;
+	u32 messages_sent;
+	u32 messages_received;
+	
+	/* Authentication */
+	u8 auth_tag[32];
+	bool authenticated;
+	
+	struct list_head list;
+};
+
+/* Quantum context per task */
+struct hardening_quantum_ctx {
+	/* Key management */
+	struct hardening_hybrid_key *identity_key;
+	struct list_head ephemeral_keys;
+	u32 key_rotation_interval;
+	
+	/* Active channels */
+	struct list_head quantum_channels;
+	u32 active_channels;
+	
+	/* Algorithm preferences */
+	enum hardening_pq_algo preferred_kem;		/* Key encapsulation */
+	enum hardening_pq_algo preferred_sig;		/* Signatures */
+	
+	/* Security policy */
+	bool require_quantum_auth;
+	bool allow_classical_fallback;
+	u32 min_security_level;		/* NIST level 1-5 */
+	
+	/* Performance optimization */
+	struct crypto_shash *hash_tfm;		/* For key derivation */
+	u8 *workspace;				/* Pre-allocated workspace */
+	u32 workspace_size;
+	
+	/* Statistics */
+	u64 keys_generated;
+	u64 signatures_created;
+	u64 signatures_verified;
+	u64 key_exchanges;
+	
+	spinlock_t lock;
+};
+
+/* Quantum authentication token */
+struct hardening_quantum_token {
+	/* Token data */
+	u8 token_id[16];
+	u64 timestamp;
+	u32 flags;
+	
+	/* Hybrid signature */
+	u8 *classical_sig;
+	u8 *quantum_sig;
+	u32 classical_sig_len;
+	u32 quantum_sig_len;
+	
+	/* Claims */
+	u32 process_id;
+	u32 user_id;
+	u32 security_level;
+	u64 expiration;
+};
+
+#endif /* CONFIG_SECURITY_HARDENING_QUANTUM */
+
 /* Global statistics */
 extern struct hardening_stats hardening_global_stats;
 
@@ -328,7 +442,8 @@ void hardening_cleanup_time_rules(struct hardening_task_ctx *ctx);
 
 /* Behavioral anomaly detection */
 struct hardening_behavior_profile *hardening_alloc_behavior_profile(void);
-void hardening_free_behavior_profile(struct hardening_behavior_profile *behavior);
+void hardening_free_behavior_profile(
+		struct hardening_behavior_profile *behavior);
 int hardening_update_behavior(struct hardening_task_ctx *ctx, int syscall_nr);
 int hardening_check_anomaly(struct hardening_task_ctx *ctx);
 int hardening_calculate_entropy(struct hardening_behavior_profile *behavior);
@@ -337,7 +452,8 @@ int hardening_update_markov_chain(struct hardening_behavior_profile *behavior,
 
 /* Resource fingerprinting */
 struct hardening_resource_baseline *hardening_alloc_resource_baseline(void);
-void hardening_free_resource_baseline(struct hardening_resource_baseline *baseline);
+void hardening_free_resource_baseline(
+		struct hardening_resource_baseline *baseline);
 int hardening_update_resources(struct hardening_task_ctx *ctx);
 int hardening_check_resource_deviation(struct hardening_task_ctx *ctx);
 
@@ -352,7 +468,8 @@ int hardening_init_container_context(struct hardening_task_ctx *ctx);
 int hardening_get_container_id(u64 *container_id);
 int hardening_apply_container_policy(struct hardening_task_ctx *ctx);
 void hardening_free_container_ctx(struct hardening_container_ctx *container);
-int hardening_check_container_operation(struct hardening_task_ctx *ctx, int op_type);
+int hardening_check_container_operation(struct hardening_task_ctx *ctx,
+					int op_type);
 bool hardening_detect_container_escape(struct hardening_task_ctx *ctx);
 bool hardening_is_container_process(void);
 int hardening_container_file_open(struct file *file);
@@ -370,7 +487,8 @@ int hardening_update_network_activity(struct hardening_task_ctx *ctx,
 int hardening_check_network_anomaly(struct hardening_task_ctx *ctx);
 void hardening_free_network_profile(struct hardening_network_profile *network);
 int hardening_socket_create(int family, int type, int protocol);
-int hardening_socket_connect(struct socket *sock, struct sockaddr *address, int addrlen);
+int hardening_socket_connect(struct socket *sock, struct sockaddr *address,
+			     int addrlen);
 
 /* Memory analysis */
 int hardening_init_memory_profile(struct hardening_task_ctx *ctx);
@@ -386,11 +504,35 @@ int hardening_compute_process_hash(struct hardening_task_ctx *ctx);
 int hardening_verify_integrity(struct hardening_task_ctx *ctx);
 void hardening_free_crypto(struct hardening_crypto_ctx *crypto);
 
+/* Quantum-resistant cryptography */
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM
+struct hardening_quantum_ctx *hardening_alloc_quantum_ctx(void);
+void hardening_free_quantum_ctx(struct hardening_quantum_ctx *quantum);
+int hardening_init_quantum(struct hardening_task_ctx *ctx);
+int hardening_quantum_generate_keypair(struct hardening_quantum_ctx *quantum,
+				      enum hardening_pq_algo algo);
+int hardening_quantum_sign(struct hardening_quantum_ctx *quantum,
+			  const void *data, size_t data_len,
+			  u8 **signature, size_t *sig_len);
+int hardening_quantum_verify(struct hardening_quantum_ctx *quantum,
+			    const void *data, size_t data_len,
+			    const u8 *signature, size_t sig_len);
+int hardening_quantum_key_exchange(struct hardening_quantum_ctx *quantum,
+				  const u8 *remote_public, size_t remote_len,
+				  u8 **shared_secret, size_t *secret_len);
+int hardening_quantum_authenticate_process(struct hardening_task_ctx *ctx);
+int hardening_quantum_establish_channel(struct hardening_quantum_ctx *quantum,
+				       u32 target_pid);
+bool hardening_quantum_is_authenticated(struct hardening_task_ctx *ctx);
+int hardening_quantum_rotate_keys(struct hardening_quantum_ctx *quantum);
+#endif
+
 /* Profile management */
 int hardening_load_profile(const char *name, 
 			  struct hardening_security_profile *profile);
 struct hardening_security_profile *hardening_find_profile(const char *name);
-int hardening_apply_profile(struct hardening_task_ctx *ctx, const char *profile_name);
+int hardening_apply_profile(struct hardening_task_ctx *ctx,
+			    const char *profile_name);
 int hardening_check_profile_policy(struct hardening_task_ctx *ctx,
 				   int policy_type, u32 value);
 int hardening_init_profiles(void);
@@ -399,11 +541,14 @@ void hardening_cleanup_profiles(void);
 /* Entropy and randomization */
 void hardening_add_entropy(struct hardening_task_ctx *ctx, u32 value);
 u32 hardening_get_random(struct hardening_task_ctx *ctx);
-int hardening_randomize_decision(struct hardening_task_ctx *ctx, int probability);
+int hardening_randomize_decision(struct hardening_task_ctx *ctx,
+				 int probability);
 void hardening_init_entropy(struct hardening_task_ctx *ctx);
 void hardening_random_delay(struct hardening_task_ctx *ctx, u32 max_delay_us);
-void hardening_entropy_security_adjust(struct hardening_task_ctx *ctx, u32 factor);
-u32 hardening_randomize_threshold(struct hardening_task_ctx *ctx, u32 base, u32 range);
+void hardening_entropy_security_adjust(struct hardening_task_ctx *ctx,
+				       u32 factor);
+u32 hardening_randomize_threshold(struct hardening_task_ctx *ctx,
+				  u32 base, u32 range);
 
 /* Adaptive security */
 void hardening_escalate_security(struct hardening_task_ctx *ctx);
@@ -411,7 +556,8 @@ void hardening_deescalate_security(struct hardening_task_ctx *ctx);
 int hardening_check_capability(struct hardening_task_ctx *ctx, int cap);
 int hardening_check_resource_limit(struct hardening_task_ctx *ctx,
 				   int resource_type, u32 value);
-const struct security_level_policy *hardening_get_level_policy(enum hardening_security_level level);
+const struct security_level_policy *
+hardening_get_level_policy(enum hardening_security_level level);
 
 /* Memory operation types */
 #define MEM_OP_MMAP		1

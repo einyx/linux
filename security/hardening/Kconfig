@@ -143,4 +143,21 @@ config SECURITY_HARDENING_STATS
 	  Collect detailed statistics about security events,
 	  anomalies, and policy violations.
 
+config SECURITY_HARDENING_QUANTUM
+	bool "Quantum-Resistant Cryptography"
+	depends on CRYPTO
+	select CRYPTO_SHA3
+	default n
+	help
+	  Enable quantum-resistant cryptographic algorithms for
+	  future-proof security against quantum computing threats.
+	  This includes:
+	  - CRYSTALS-Kyber for key encapsulation
+	  - CRYSTALS-Dilithium for digital signatures
+	  - Hybrid classical/quantum authentication
+	  - Post-quantum secure channels
+	  
+	  Warning: This feature has performance overhead and should
+	  only be enabled for high-security government deployments.
+
 endif # SECURITY_HARDENING

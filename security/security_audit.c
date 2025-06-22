@@ -57,7 +57,8 @@ static u32 audit_event_hash(const char *event_type, uid_t uid)
 }
 
 static struct audit_flood_entry *
-find_flood_entry(struct security_audit_ctx *ctx, const char *event_type, uid_t uid)
+find_flood_entry(struct security_audit_ctx *ctx, const char *event_type,
+		 uid_t uid)
 {
 	u32 bucket = audit_event_hash(event_type, uid);
 	struct audit_flood_entry *entry;

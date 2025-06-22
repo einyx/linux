@@ -357,7 +357,8 @@ struct hardening_behavior_profile *hardening_alloc_behavior_profile(void)
 	return behavior;
 }
 
-void hardening_free_behavior_profile(struct hardening_behavior_profile *behavior)
+void hardening_free_behavior_profile(
+		struct hardening_behavior_profile *behavior)
 {
 	struct syscall_transition *trans, *tmp;
 	int i;

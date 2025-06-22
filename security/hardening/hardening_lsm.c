@@ -22,13 +22,18 @@ int hardening_enabled = 1;
 int hardening_enforce = 0;
 
 /* Forward declarations */
-extern struct hardening_resource_baseline *hardening_alloc_resource_baseline(void);
-extern void hardening_free_resource_baseline(struct hardening_resource_baseline *res);
+extern struct hardening_resource_baseline *
+hardening_alloc_resource_baseline(void);
+extern void hardening_free_resource_baseline(
+		struct hardening_resource_baseline *res);
 extern void hardening_cleanup_time_rules(struct hardening_task_ctx *ctx);
 extern void hardening_free_lineage(struct hardening_lineage *lineage);
-extern void hardening_free_container_ctx(struct hardening_container_ctx *container);
-extern void hardening_free_network_profile(struct hardening_network_profile *network);
-extern void hardening_free_memory_profile(struct hardening_memory_profile *memory);
+extern void hardening_free_container_ctx(
+		struct hardening_container_ctx *container);
+extern void hardening_free_network_profile(
+		struct hardening_network_profile *network);
+extern void hardening_free_memory_profile(
+		struct hardening_memory_profile *memory);
 extern void hardening_free_crypto(struct hardening_crypto_ctx *crypto);
 extern void hardening_init_entropy(struct hardening_task_ctx *ctx);
 extern int hardening_init_profiles(void);
@@ -92,6 +97,13 @@ static struct hardening_task_ctx *hardening_alloc_task_ctx(void)
 	hardening_init_crypto(ctx);
 #endif
 
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM
+	/* Initialize quantum crypto context */
+	if (hardening_init_quantum(ctx) < 0)
+		pr_warn("hardening: failed to init quantum crypto for %s[%d]\n",
+			current->comm, current->pid);
+#endif
+
 	return ctx;
 
 #ifdef CONFIG_SECURITY_HARDENING_RESOURCES
@@ -149,6 +161,11 @@ static void hardening_free_task_ctx(struct hardening_task_ctx *ctx)
 #ifdef CONFIG_SECURITY_HARDENING_CRYPTO
 	if (ctx->crypto)
 		hardening_free_crypto(ctx->crypto);
+#endif
+
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM
+	if (ctx->quantum)
+		hardening_free_quantum_ctx(ctx->quantum);
 #endif
 	
 	kfree(ctx);
@@ -307,6 +324,23 @@ static int hardening_file_open(struct file *file)
 		if (ret)
 			return ret;
 	}
+	
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM
+	/* Require quantum authentication for sensitive files in high security mode */
+	if (ctx->sec_level >= HARDENING_LEVEL_HIGH && file->f_path.dentry) {
+		const char *filename = file->f_path.dentry->d_name.name;
+		
+		/* Check for sensitive files */
+		if (strstr(filename, "shadow") || strstr(filename, "private") ||
+		    strstr(filename, "secret") || strstr(filename, "key")) {
+			if (!hardening_quantum_is_authenticated(ctx)) {
+				pr_notice("hardening: blocked access to %s - quantum auth required\n",
+					  filename);
+				return -EPERM;
+			}
+		}
+	}
+#endif
 	
 	return 0;
 }

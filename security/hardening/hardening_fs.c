@@ -13,6 +13,7 @@ static struct dentry *hardening_dir;
 static struct dentry *status_file;
 static struct dentry *stats_file;
 static struct dentry *policy_file;
+static struct dentry *quantum_file;
 
 /* Show current module status */
 static int hardening_status_show(struct seq_file *m, void *v)
