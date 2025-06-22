@@ -137,6 +137,8 @@ build_kernel() {
     ./scripts/config --enable CONFIG_VIRTIO_BLK
     ./scripts/config --enable CONFIG_VIRTIO_NET
     ./scripts/config --enable CONFIG_9P_FS
+    ./scripts/config --disable CONFIG_DRM_I915
+    ./scripts/config --enable CONFIG_HARDENED_USERCOPY
     
     # Enable debugging if requested
     if [ "$DEBUG" = true ]; then
