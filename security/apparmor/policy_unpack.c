@@ -30,6 +30,9 @@
 #include "include/policy_unpack.h"
 #include "include/policy_compat.h"
 
+/* Maximum blob size to prevent excessive memory allocations */
+#define AA_MAX_BLOB_SIZE (512 * 1024 * 1024) /* 512MB */
+
 /* audit callback for unpack fields */
 static void audit_cb(struct audit_buffer *ab, void *va)
 {
@@ -356,6 +359,12 @@ VISIBLE_IF_KUNIT size_t aa_unpack_blob(struct aa_ext *e, char **blob, const char
 			goto fail;
 		size = le32_to_cpu(get_unaligned((__le32 *) e->pos));
 		e->pos += sizeof(u32);
+		/* Validate size to prevent integer overflow and excessive allocations */
+		if (size > AA_MAX_BLOB_SIZE) {
+			aa_audit_msg(AUDIT_APPARMOR_ERROR, NULL, NULL,
+				     "blob size exceeds maximum", NULL, -ERANGE);
+			goto fail;
+		}
 		if (aa_inbounds(e, (size_t) size)) {
 			*blob = e->pos;
 			e->pos += size;
