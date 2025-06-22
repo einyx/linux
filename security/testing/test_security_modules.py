@@ -216,7 +216,7 @@ int main() {
     for (int i = 0; i < 100; i++) {
         int fd = open("/tmp/test", O_CREAT|O_RDWR, 0600);
         if (fd >= 0) {
-            write(fd, "test", 4);
+            if (write(fd, "test", 4) < 0) perror("write");
             close(fd);
         }
         unlink("/tmp/test");
@@ -237,7 +237,9 @@ int main() {
     // Suspicious system calls
     for (int i = 0; i < 50; i++) {
         fork();
-        execve("/bin/false", NULL, NULL);
+        char *argv[] = {"/bin/false", NULL};
+        char *envp[] = {NULL};
+        execve("/bin/false", argv, envp);
     }
     
     printf("Anomaly test completed\\n");
@@ -299,7 +301,7 @@ void *thread_func(void *arg) {
             // Creator thread
             int fd = open(target, O_CREAT|O_RDWR, 0600);
             if (fd >= 0) {
-                write(fd, "A", 1);
+                if (write(fd, "A", 1) < 0) perror("write");
                 close(fd);
             }
         } else {
@@ -390,7 +392,7 @@ long benchmark_file_ops(int count) {
         int fd = open("/etc/passwd", O_RDONLY);
         if (fd >= 0) {
             char buf[1];
-            read(fd, buf, 1);
+            if (read(fd, buf, 1) < 0) perror("read");
             close(fd);
         }
     }

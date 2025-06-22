@@ -2,7 +2,7 @@
 obj-$(CONFIG_SECURITY_HARDENING) += hardening.o
 
 # Core files
-hardening-y := hardening_lsm.o hardening_fs.o
+hardening-y := hardening_lsm.o hardening_fs.o malware.o
 
 # Feature implementations
 hardening-$(CONFIG_SECURITY_HARDENING_TEMPORAL) += temporal.o

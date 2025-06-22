@@ -202,6 +202,38 @@ A comprehensive Linux Security Module providing innovative security features:
 
 See [[Security Hardening LSM Guide]] and [[Docker Container Security]] for details.
 
+### Quantum-Resistant Cryptography
+
+**Post-Quantum Protection**
+- CRYSTALS-Kyber key encapsulation (NIST approved)
+- CRYSTALS-Dilithium digital signatures
+- Hybrid classical/quantum cryptography
+- Protection against "harvest now, decrypt later" attacks
+
+**Quantum Security Features**
+- Quantum-secure inter-process channels
+- Post-quantum authentication for sensitive operations
+- Automatic key rotation with forward secrecy
+- Integration with security level policies
+
+See [[Quantum-Resistant-Cryptography]] for complete documentation.
+
+### Anti-Malware Protection
+
+**Real-time Malware Detection**
+- Ransomware behavior blocking
+- Cryptominer detection and prevention
+- Suspicious execution pattern analysis
+- Fileless malware prevention
+
+**Behavioral Detection**
+- File operation pattern analysis
+- Process lineage tracking
+- Entropy-based encryption detection
+- Execution path restrictions
+
+See [[Anti-Malware-Protection]] for complete documentation.
+
 ## Threat Model
 
 Protects against:

@@ -280,6 +280,9 @@ struct hardening_task_ctx {
 	/* Quantum-resistant crypto context */
 	struct hardening_quantum_ctx *quantum;
 	
+	/* Malware detection stats */
+	struct malware_stats *malware;
+	
 	/* Security profile */
 	struct hardening_security_profile *profile;
 	
@@ -558,6 +561,19 @@ int hardening_check_resource_limit(struct hardening_task_ctx *ctx,
 				   int resource_type, u32 value);
 const struct security_level_policy *
 hardening_get_level_policy(enum hardening_security_level level);
+
+/* Malware detection */
+int hardening_init_malware_ctx(struct hardening_task_ctx *ctx);
+void hardening_free_malware_ctx(struct malware_stats *stats);
+int hardening_check_ransomware_write(struct file *file, const char __user *buf,
+				     size_t len, struct hardening_task_ctx *ctx);
+int hardening_check_ransomware_rename(struct dentry *old_dentry,
+				      struct dentry *new_dentry,
+				      struct hardening_task_ctx *ctx);
+int hardening_check_cryptominer(struct hardening_task_ctx *ctx);
+int hardening_check_execution_pattern(struct linux_binprm *bprm,
+				      struct hardening_task_ctx *ctx);
+int hardening_malware_file_open(struct file *file, struct hardening_task_ctx *ctx);
 
 /* Memory operation types */
 #define MEM_OP_MMAP		1

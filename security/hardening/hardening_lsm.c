@@ -38,6 +38,7 @@ extern void hardening_free_crypto(struct hardening_crypto_ctx *crypto);
 extern void hardening_init_entropy(struct hardening_task_ctx *ctx);
 extern int hardening_init_profiles(void);
 extern void hardening_cleanup_profiles(void);
+extern void hardening_free_malware_ctx(struct malware_stats *stats);
 
 static struct hardening_task_ctx *hardening_alloc_task_ctx(void)
 {
@@ -104,6 +105,11 @@ static struct hardening_task_ctx *hardening_alloc_task_ctx(void)
 			current->comm, current->pid);
 #endif
 
+	/* Initialize malware detection */
+	if (hardening_init_malware_ctx(ctx) < 0)
+		pr_warn("hardening: failed to init malware detection for %s[%d]\n",
+			current->comm, current->pid);
+
 	return ctx;
 
 err_resources:
@@ -165,6 +171,9 @@ static void hardening_free_task_ctx(struct hardening_task_ctx *ctx)
 		hardening_free_quantum_ctx(ctx->quantum);
 #endif
 
+	if (ctx->malware)
+		hardening_free_malware_ctx(ctx->malware);
+
 	kfree(ctx);
 }
 
@@ -196,6 +205,7 @@ static void hardening_cred_free(struct cred *cred)
 static int hardening_bprm_creds_for_exec(struct linux_binprm *bprm)
 {
 	struct hardening_task_ctx *ctx;
+	int ret;
 
 	if (!hardening_enabled)
 		return 0;
@@ -218,6 +228,11 @@ static int hardening_bprm_creds_for_exec(struct linux_binprm *bprm)
 		if (ret)
 			return ret;
 	}
+	
+	/* Check for malware execution patterns */
+	ret = hardening_check_execution_pattern(bprm, ctx);
+	if (ret)
+		return ret;
 
 	pr_debug("hardening: initialized task context for %s\n", bprm->filename);
 	return 0;
@@ -321,6 +336,11 @@ static int hardening_file_open(struct file *file)
 		if (ret)
 			return ret;
 	}
+	
+	/* Check for malware indicators */
+	ret = hardening_malware_file_open(file, ctx);
+	if (ret)
+		return ret;
 
 #ifdef CONFIG_SECURITY_HARDENING_QUANTUM
 	/* Require quantum authentication for sensitive files in high security mode */
