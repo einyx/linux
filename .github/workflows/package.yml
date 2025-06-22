@@ -1,0 +1,116 @@
+name: Build DEB and RPM packages
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential debhelper devscripts dh-make
+        sudo apt-get install -y bc kmod cpio flex bison libssl-dev libelf-dev
+        sudo apt-get install -y crossbuild-essential-arm64
+    
+    - name: Configure kernel
+      run: |
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+        fi
+        make defconfig
+    
+    - name: Build kernel
+      run: |
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+        fi
+        make -j$(nproc) deb-pkg
+    
+    - name: Upload DEB packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: deb-packages-${{ matrix.arch }}
+        path: ../*.deb
+        retention-days: 7
+
+  build-rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        dnf install -y rpm-build make gcc bc openssl-devel elfutils-libelf-devel
+        dnf install -y bison flex perl-devel perl-generators
+        if [ "${{ matrix.arch }}" = "aarch64" ]; then
+          dnf install -y gcc-aarch64-linux-gnu
+        fi
+    
+    - name: Configure kernel
+      run: |
+        if [ "${{ matrix.arch }}" = "aarch64" ]; then
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+        fi
+        make defconfig
+    
+    - name: Build kernel
+      run: |
+        if [ "${{ matrix.arch }}" = "aarch64" ]; then
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+        fi
+        make -j$(nproc) rpm-pkg
+    
+    - name: Upload RPM packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: rpm-packages-${{ matrix.arch }}
+        path: ~/rpmbuild/RPMS/*/*.rpm
+        retention-days: 7
+
+  release:
+    needs: [build-deb, build-rpm]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+    
+    - name: Display structure of downloaded files
+      run: ls -laR
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          deb-packages-*/*.deb
+          rpm-packages-*/*.rpm
+        draft: false
+        prerelease: false
+        generate_release_notes: true
