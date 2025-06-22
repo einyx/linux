@@ -21,6 +21,8 @@
 #define HARDENING_DAY_FRIDAY	(1 << 5)
 #define HARDENING_DAY_SATURDAY	(1 << 6)
 
+#define MAX_HOUR_VALUE		23	/* Maximum valid hour (0-23) */
+
 static int get_current_hour_and_day(u8 *hour, u8 *day)
 {
 	struct timespec64 ts;
@@ -95,7 +97,8 @@ int hardening_add_time_rule(struct hardening_task_ctx *ctx,
 		return -EINVAL;
 		
 	/* Validate rule */
-	if (new_rule->hour_start > 23 || new_rule->hour_end > 23)
+	if (new_rule->hour_start > MAX_HOUR_VALUE ||
+	    new_rule->hour_end > MAX_HOUR_VALUE)
 		return -EINVAL;
 		
 	spin_lock_irqsave(&ctx->lock, flags);

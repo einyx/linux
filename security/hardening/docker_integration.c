@@ -38,6 +38,9 @@
 #define CONTAINER_MAX_CAPS	5	/* Maximum capabilities for containers */
 #define CONTAINER_MAX_SYSCALLS	200	/* Restricted syscall set */
 #define CONTAINER_MAX_MOUNTS	50	/* Mount limit per container */
+#define PRIVILEGED_PORT_LIMIT	1024	/* Port numbers < 1024 are privileged */
+#define HOST_PATH_PREFIX_LEN	5	/* Length of "/host" prefix */
+#define DOCKER_LIB_PREFIX_LEN	15	/* Length of "/var/lib/docker" prefix */
 
 /* Container escape detection patterns */
 static const char *escape_patterns[] = {
@@ -173,8 +176,8 @@ static int check_container_escape_attempt(struct file *file)
 	}
 	
 	/* Check for accessing host filesystem */
-	if (strncmp(path, "/host", 5) == 0 ||
-	    strncmp(path, "/var/lib/docker", 15) == 0) {
+	if (strncmp(path, "/host", HOST_PATH_PREFIX_LEN) == 0 ||
+	    strncmp(path, "/var/lib/docker", DOCKER_LIB_PREFIX_LEN) == 0) {
 		uid = from_kuid(&init_user_ns, current_uid());
 		security_audit_log("container_host_access", uid,
 				   "path=%s", path);
@@ -283,7 +286,7 @@ static int container_network_isolation(struct socket *sock,
 		
 		/* Deny access to host loopback from container */
 		if (addr_in->sin_addr.s_addr == htonl(INADDR_LOOPBACK) &&
-		    ntohs(addr_in->sin_port) < 1024) {
+		    ntohs(addr_in->sin_port) < PRIVILEGED_PORT_LIMIT) {
 			uid = from_kuid(&init_user_ns, current_uid());
 			security_audit_log("container_host_network", uid,
 					   "port=%u denied", ntohs(addr_in->sin_port));
