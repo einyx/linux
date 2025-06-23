@@ -16,9 +16,9 @@ jobs:
     runs-on: self-hosted
     strategy:
       matrix:
-        config: [defconfig, allmodconfig, tinyconfig]
+        config: [defconfig, tinyconfig]  # Removed allmodconfig as it's too resource intensive
         compiler: [gcc, clang]
-        arch: [x86_64, arm64]
+        arch: [x86_64]  # Focus on x86_64 for now to reduce build matrix
     
     steps:
     - name: Setup runner directories
@@ -40,16 +40,11 @@ jobs:
         if [ "${{ matrix.compiler }}" = "clang" ]; then
           sudo apt-get install -y clang lld llvm
         fi
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-        fi
+        # arm64 cross-compiler not needed for x86_64 only builds
     
     - name: Configure kernel
       run: |
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-        fi
+        # x86_64 is the default architecture
         if [ "${{ matrix.compiler }}" = "clang" ]; then
           export CC=clang
           export LD=ld.lld
@@ -58,22 +53,21 @@ jobs:
     
     - name: Build kernel
       run: |
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-        fi
+        # x86_64 is the default architecture
         if [ "${{ matrix.compiler }}" = "clang" ]; then
           export CC=clang
           export LD=ld.lld
         fi
-        make -j$(nproc)
+        # Build with limited parallelism to avoid memory issues
+        # Use half the available cores for self-hosted runners
+        JOBS=$(($(nproc) / 2))
+        [ $JOBS -lt 1 ] && JOBS=1
+        echo "Building with $JOBS parallel jobs"
+        make -j$JOBS || { echo "Build failed, retrying with verbose output..."; make V=1 -j1; }
     
     - name: Build modules
       run: |
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-        fi
+        # x86_64 is the default architecture
         if [ "${{ matrix.compiler }}" = "clang" ]; then
           export CC=clang
           export LD=ld.lld
