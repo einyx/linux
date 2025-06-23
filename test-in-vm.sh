@@ -384,8 +384,8 @@ main() {
     # Performance test
     performance_test
     
-    # Cleanup
-    rm -f initramfs.cpio.gz boot.log
+    # Cleanup - only remove temporary files, keep boot.log for debugging
+    rm -f initramfs.cpio.gz
     
     log "All tests completed successfully!"
 }
