@@ -79,7 +79,20 @@ echo ""
 # 6. Quick VM test (if requested)
 if [ "$1" = "--with-vm" ]; then
     echo "=== VM Boot Test ==="
-    run_test "VM boot test" "./test-in-vm.sh"
+    # VM boot test needs special handling due to QEMU output
+    echo -n "Running VM boot test... "
+    
+    if ./test-in-vm.sh > /tmp/vm_test_output_$$.log 2>&1; then
+        echo -e "${GREEN}PASS${NC}"
+        PASSED_TESTS+=("VM boot test")
+    else
+        echo -e "${RED}FAIL${NC}"
+        FAILED_TESTS+=("VM boot test")
+        echo "Error output:"
+        tail -50 /tmp/vm_test_output_$$.log | sed 's/^/  /'
+    fi
+    
+    rm -f /tmp/vm_test_output_$$.log
     echo ""
 fi
 
@@ -105,3 +118,50 @@ echo "For more thorough testing:"
 echo "  - Full VM test: ./test-in-vm.sh"
 echo "  - GitHub Actions: ./test-github-actions.sh all"
 echo "  - Kernel selftests: make kselftest"
+
+# Generate Debian package if all tests passed
+if [ ${#FAILED_TESTS[@]} -eq 0 ]; then
+    echo ""
+    echo "=== Building Debian Package ==="
+    
+    # Get kernel version
+    KERNEL_VERSION=$(make kernelversion 2>/dev/null || echo "unknown")
+    LOCALVERSION=$(grep CONFIG_LOCALVERSION .config 2>/dev/null | cut -d'"' -f2 || echo "")
+    FULL_VERSION="${KERNEL_VERSION}${LOCALVERSION}"
+    
+    echo "Building kernel package version: ${FULL_VERSION}"
+    
+    # Build debian packages
+    # Note: This requires debhelper and libdw-dev packages to be installed
+    # Install with: sudo apt-get install debhelper libdw-dev
+    if command -v dh_listpackages >/dev/null 2>&1; then
+        if make -j$(nproc) bindeb-pkg > /tmp/deb_build_$$.log 2>&1; then
+            echo -e "${GREEN}[SUCCESS]${NC} Debian package built successfully"
+            
+            # List generated packages
+            echo ""
+            echo "Generated packages:"
+            ls -la ../*.deb 2>/dev/null | grep "${KERNEL_VERSION}" | sed 's/^/  /'
+            
+            # Create packages directory if it doesn't exist
+            mkdir -p packages
+            
+            # Move packages to packages directory
+            if mv ../*${KERNEL_VERSION}*.deb packages/ 2>/dev/null; then
+                echo ""
+                echo "Packages moved to ./packages/ directory:"
+                ls -la packages/*.deb | sed 's/^/  /'
+            fi
+        else
+            echo -e "${YELLOW}[WARNING]${NC} Debian package build failed"
+            echo "Build log tail:"
+            tail -20 /tmp/deb_build_$$.log | sed 's/^/  /'
+        fi
+        
+        rm -f /tmp/deb_build_$$.log
+    else
+        echo -e "${YELLOW}[WARNING]${NC} Debian package build skipped - missing build dependencies"
+        echo "To build debian packages, install:"
+        echo "  sudo apt-get install debhelper libdw-dev"
+    fi
+fi
