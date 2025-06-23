@@ -1,0 +1,54 @@
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    jq \
+    build-essential \
+    libssl-dev \
+    libffi-dev \
+    python3 \
+    python3-venv \
+    python3-dev \
+    python3-pip \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash runner \
+    && usermod -aG sudo runner \
+    && echo "runner ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+WORKDIR /home/runner
+
+ENV RUNNER_VERSION=2.325.0
+ENV RUNNER_CHECKSUM=5020da7139d85c776059f351e0de8fdec753affc9c558e892472d43ebeb518f4
+
+RUN curl -o actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz -L \
+    https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
+    && echo "${RUNNER_CHECKSUM}  actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" | shasum -a 256 -c \
+    && tar xzf actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
+    && rm actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
+    && sudo ./bin/installdependencies.sh
+
+# Create necessary directories for GitHub Actions with full permissions
+# This ensures directories exist and are accessible regardless of volume mounts
+RUN for i in "" 1 2 3 4 5 6; do \
+        sudo mkdir -p /tmp/runner-work${i}/_tool /tmp/runner-work${i}/_temp /tmp/runner-work${i}/_actions /tmp/runner-work${i}/_PipelineMapping; \
+        sudo chmod -R 777 /tmp/runner-work${i}; \
+    done \
+    && sudo mkdir -p /tmp/runner-temp /tmp/runner-tool-cache \
+    && sudo chmod -R 777 /tmp/runner-temp /tmp/runner-tool-cache \
+    && sudo mkdir -p /home/runner/work \
+    && sudo chmod -R 777 /home/runner/work
+
+# Switch to runner user
+USER runner
+
+# Set environment variables for runner
+ENV RUNNER_TEMP=/tmp/runner-temp
+ENV RUNNER_TOOL_CACHE=/tmp/runner-tool-cache
+ENV RUNNER_ALLOW_RUNASROOT=0
+
+COPY --chown=runner:runner entrypoint.sh /home/runner/entrypoint.sh
+RUN chmod +x /home/runner/entrypoint.sh
+ENTRYPOINT ["/home/runner/entrypoint.sh"]

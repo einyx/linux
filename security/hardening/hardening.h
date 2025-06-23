@@ -325,6 +325,9 @@ enum hardening_pq_algo {
 
 /* Hybrid key structure (classical + quantum) */
 struct hardening_hybrid_key {
+	/* List management */
+	struct list_head list;
+	
 	/* Classical component */
 	u8 classical_key[32];		/* AES-256 or similar */
 	u32 classical_key_len;

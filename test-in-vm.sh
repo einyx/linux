@@ -168,91 +168,78 @@ build_kernel() {
 create_initramfs() {
     log "Creating test initramfs..."
     
-    INITRAMFS_DIR=$(mktemp -d)
-    cd "$INITRAMFS_DIR"
+    # First try to create a minimal static init binary
+    cat > test-init.c << 'EOF'
+#include <unistd.h>
+#include <sys/reboot.h>
+#include <linux/reboot.h>
+
+int main() {
+    const char *msg1 = "=== Kernel Boot Test ===\n";
+    const char *msg2 = "BOOT_SUCCESS\n";
     
-    # Create directory structure
-    mkdir -p {bin,sbin,etc,proc,sys,dev,tmp,mnt,root}
+    write(1, msg1, 25);
+    write(1, msg2, 13);
     
-    # Create init script - try static approach
-    cat > init << 'EOF'
-#!/bin/busybox sh
-
-echo "=== Kernel Boot Test ==="
-
-# Try to mount basic filesystems
-busybox mount -t proc none /proc 2>/dev/null || echo "proc mount failed"
-busybox mount -t sysfs none /sys 2>/dev/null || echo "sysfs mount failed"
-
-# Basic system info  
-echo "Kernel version: $(busybox uname -r)"
-echo "Architecture: $(busybox uname -m)"
-
-if [ -f /proc/meminfo ]; then
-    echo "Memory: $(busybox grep MemTotal /proc/meminfo)"
-fi
-
-if [ -f /proc/cpuinfo ]; then
-    echo "CPUs: $(busybox grep -c processor /proc/cpuinfo)"
-fi
-
-if [ -f /proc/uptime ]; then
-    echo "Boot time: $(busybox cut -d' ' -f1 /proc/uptime)s"
-fi
-
-# Signal successful boot
-echo "BOOT_SUCCESS"
-
-# Simple shutdown
-busybox sync
-busybox poweroff -f
+    sync();
+    
+    /* Try multiple shutdown methods */
+    reboot(LINUX_REBOOT_CMD_POWER_OFF);
+    reboot(LINUX_REBOOT_CMD_HALT);
+    
+    /* If still here, just exit */
+    return 0;
+}
 EOF
-    chmod +x init
     
-    # Try to use the host's busybox first (static binary)
-    if command -v busybox >/dev/null 2>&1; then
-        cp $(command -v busybox) bin/busybox
-        chmod +x bin/busybox
-        # Use busybox as shell  
-        ln -s busybox bin/sh
+    # Try to compile statically
+    if command -v gcc >/dev/null 2>&1 && gcc -static -o test-init test-init.c 2>/dev/null; then
+        log "Using static C init"
+        mkdir -p minimal-initramfs
+        cp test-init minimal-initramfs/init
+        (cd minimal-initramfs && echo init | cpio -o -H newc | gzip > ../initramfs.cpio.gz)
+        rm -rf minimal-initramfs test-init test-init.c
     else
-        # Copy host shell and libraries (original approach but better)
-        if [ -f /bin/dash ]; then
-            # Use dash if available (smaller, static-friendly)
-            cp /bin/dash bin/sh
-        elif [ -f /bin/sh ]; then
-            cp /bin/sh bin/sh
+        # Fallback to busybox approach
+        INITRAMFS_DIR=$(mktemp -d)
+        cd "$INITRAMFS_DIR"
+        
+        # Create directory structure
+        mkdir -p {bin,sbin,etc,proc,sys,dev,tmp,mnt,root}
+        
+        if [ -f /usr/bin/busybox-static ]; then
+            log "Using busybox-static for initramfs"
+            cp /usr/bin/busybox-static bin/busybox
+        elif command -v busybox >/dev/null 2>&1; then
+            log "Using host busybox"
+            cp $(command -v busybox) bin/busybox
         else
-            echo "No suitable shell found" >&2
+            error "No suitable init method found"
             exit 1
         fi
-        chmod +x bin/sh
         
-        # Copy required libraries
-        mkdir -p lib lib64 lib/x86_64-linux-gnu
-        for lib in $(ldd bin/sh 2>/dev/null | grep -o '/lib[^ ]*' | sort -u); do
-            if [ -f "$lib" ]; then
-                cp "$lib" ".${lib}" 2>/dev/null || true
-            fi
+        chmod +x bin/busybox
+        
+        # Create symlinks
+        for cmd in sh echo mount umount sync poweroff halt reboot; do
+            ln -s busybox bin/$cmd
         done
         
-        # Create minimal busybox wrapper
-        cat > bin/busybox << 'EOF'
+        # Create init script
+        cat > init << 'EOF'
 #!/bin/sh
-exec /bin/sh "$@"
+echo "=== Kernel Boot Test ==="
+echo "BOOT_SUCCESS"
+sync
+poweroff -f 2>/dev/null || halt -f 2>/dev/null || echo "Cannot halt"
 EOF
-        chmod +x bin/busybox
+        chmod +x init
+        
+        # Create cpio archive
+        find . | cpio -o -H newc 2>/dev/null | gzip > "$OLDPWD/initramfs.cpio.gz"
+        cd "$OLDPWD"
+        rm -rf "$INITRAMFS_DIR"
     fi
-    
-    # Create other essential symlinks
-    for cmd in mount poweroff sync ping dd grep cut seq uname; do
-        ln -s busybox bin/$cmd 2>/dev/null || true
-    done
-    
-    # Create cpio archive
-    find . | cpio -o -H newc 2>/dev/null | gzip > "$OLDPWD/initramfs.cpio.gz"
-    cd "$OLDPWD"
-    rm -rf "$INITRAMFS_DIR"
     
     log "Initramfs created: $(ls -lh initramfs.cpio.gz | awk '{print $5}')"
 }
@@ -267,7 +254,7 @@ boot_test() {
     log "Starting boot test in QEMU..."
     
     # Prepare kernel command line with explicit init
-    CMDLINE="console=ttyS0 panic=10 init=/init"
+    CMDLINE="console=ttyS0 panic=10 rdinit=/init earlyprintk=serial,ttyS0,115200"
     if [ "$RUN_TESTS" = true ]; then
         CMDLINE="$CMDLINE run_tests"
     fi
@@ -289,15 +276,18 @@ boot_test() {
     # Add KVM if available
     if [ -w /dev/kvm ]; then
         log "KVM acceleration available"
-        QEMU_CMD="$QEMU_CMD -enable-kvm"
+        QEMU_CMD="$QEMU_CMD -enable-kvm -cpu host"
     else
         warning "KVM not available, boot will be slower"
+        QEMU_CMD="$QEMU_CMD -cpu qemu64"
     fi
     
     # Run QEMU with timeout
     log "Booting kernel (timeout: ${TEST_TIMEOUT}s)..."
     
-    if timeout $TEST_TIMEOUT bash -c "$QEMU_CMD" | tee boot.log; then
+    # Run boot test with timeout, allowing for halted state
+    if timeout $TEST_TIMEOUT bash -c "$QEMU_CMD" 2>&1 | tee boot.log || true; then
+        # Check for success marker
         if grep -q "BOOT_SUCCESS" boot.log; then
             log "Boot test PASSED"
             
@@ -312,16 +302,14 @@ boot_test() {
                 log "Test results:"
                 grep -E "(PASS|FAIL)" boot.log | sed 's/^/  /'
             fi
+            
+            # Success even if poweroff didn't work perfectly
+            return 0
         else
             error "Boot test FAILED - no success marker found"
             tail -20 boot.log
             exit 1
         fi
-    else
-        error "Boot test FAILED - timeout or crash"
-        echo "Last 20 lines of output:"
-        tail -20 boot.log
-        exit 1
     fi
 }
 

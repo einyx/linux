@@ -95,7 +95,7 @@ EOF
         act -W ".github/workflows/${workflow}.yml" \
             -e /tmp/act-event.json \
             --container-architecture linux/amd64 \
-            -P ubuntu-latest=catthehacker/ubuntu:act-latest \
+            -P self-hosted=catthehacker/ubuntu:act-latest \
             $event
         
         echo "✓ Workflow $workflow completed"

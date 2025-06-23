@@ -1,0 +1,45 @@
+=== Kain Kernel Test Suite ===
+
+=== Environment Checks ===
+Running Kernel source check... [0;32mPASS[0m
+Running Git repository... [0;32mPASS[0m
+Running Build dependencies... [0;32mPASS[0m
+
+=== Static Analysis ===
+Running Kernel config... [0;32mPASS[0m
+Running Headers check... [0;32mPASS[0m
+Running Sparse check (sample)... [0;32mPASS[0m
+Running Checkpatch... [0;32mPASS[0m
+
+=== Build Tests ===
+Running Scripts build... [0;32mPASS[0m
+Running Documentation build... [0;32mPASS[0m
+Running Clean build... [0;32mPASS[0m
+
+=== Security Checks ===
+Running Hardening config... [0;32mPASS[0m
+Running Stack protector... [0;32mPASS[0m
+Running KASLR enabled... [0;32mPASS[0m
+
+=== GitHub Actions Validation ===
+Running Workflow debian-repo.yml... [0;32mPASS[0m
+Running Workflow docs.yml... [0;32mPASS[0m
+Running Workflow fuzzing.yml... [0;32mPASS[0m
+Running Workflow package.yml... [0;32mPASS[0m
+Running Workflow performance.yml... [0;32mPASS[0m
+Running Workflow pr-validation.yml... [0;32mPASS[0m
+Running Workflow publish-to-repo.yml... [0;32mPASS[0m
+Running Workflow release.yml... [0;32mPASS[0m
+Running Workflow security.yml... [0;32mPASS[0m
+Running Workflow test.yml... [0;32mPASS[0m
+
+=== Test Summary ===
+Passed: [0;32m23[0m
+Failed: [0;31m0[0m
+
+[0;32mAll tests passed![0m
+
+For more thorough testing:
+  - Full VM test: ./test-in-vm.sh
+  - GitHub Actions: ./test-github-actions.sh all
+  - Kernel selftests: make kselftest
