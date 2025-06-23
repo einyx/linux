@@ -11,11 +11,21 @@ permissions:
   pages: write
   id-token: write
 
+env:
+  # Avoid permission issues with self-hosted runners
+  RUNNER_TEMP: /tmp/runner-temp
+  RUNNER_TOOL_CACHE: /tmp/runner-tool-cache
 
 jobs:
   build-packages:
     runs-on: self-hosted
     steps:
+      - name: Setup runner directories
+        run: |
+          sudo mkdir -p /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
+          sudo chmod -R 777 /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work
+          sudo chown -R $USER:$USER /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work || true
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
