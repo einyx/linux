@@ -29,7 +29,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Install dependencies
         run: |
@@ -211,7 +211,11 @@ jobs:
 
       - name: Create repository documentation
         run: |
-          cat > repo/index.html <<'EOF'
+          # Export variables for use in heredoc
+          export GITHUB_REPOSITORY_OWNER="${{ github.repository_owner }}"
+          export GITHUB_REPOSITORY_NAME="${{ github.event.repository.name }}"
+          
+          cat > repo/index.html <<'HTMLEOF'
           <!DOCTYPE html>
           <html>
           <head>
@@ -233,10 +237,10 @@ jobs:
               <p>Add this repository to your system:</p>
               
               <pre><code># Download and add the GPG key
-wget -qO - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo-key.asc | sudo apt-key add -
+wget -qO - https://GITHUB_REPOSITORY_OWNER.github.io/GITHUB_REPOSITORY_NAME/repo-key.asc | sudo apt-key add -
 
 # Add the repository
-echo "deb https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/ stable main" | sudo tee /etc/apt/sources.list.d/kain-kernel.list
+echo "deb https://GITHUB_REPOSITORY_OWNER.github.io/GITHUB_REPOSITORY_NAME/ stable main" | sudo tee /etc/apt/sources.list.d/kain-kernel.list
 
 # Update package list
 sudo apt update
@@ -264,27 +268,35 @@ sudo apt install linux-image-kain linux-headers-kain</code></pre>
               </div>
           </body>
           </html>
-          EOF
+          HTMLEOF
+          
+          # Replace placeholders with actual values
+          sed -i "s|GITHUB_REPOSITORY_OWNER|${GITHUB_REPOSITORY_OWNER}|g" repo/index.html
+          sed -i "s|GITHUB_REPOSITORY_NAME|${GITHUB_REPOSITORY_NAME}|g" repo/index.html
 
           # Create apt setup script
-          cat > repo/setup.sh <<'EOF'
+          cat > repo/setup.sh <<'SCRIPTEOF'
           #!/bin/bash
           set -e
           
           echo "Setting up Kain Kernel repository..."
           
           # Add GPG key
-          wget -qO - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/repo-key.asc | sudo apt-key add -
+          wget -qO - https://GITHUB_REPOSITORY_OWNER.github.io/GITHUB_REPOSITORY_NAME/repo-key.asc | sudo apt-key add -
           
           # Add repository
-          echo "deb https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/ stable main" | sudo tee /etc/apt/sources.list.d/kain-kernel.list
+          echo "deb https://GITHUB_REPOSITORY_OWNER.github.io/GITHUB_REPOSITORY_NAME/ stable main" | sudo tee /etc/apt/sources.list.d/kain-kernel.list
           
           # Update package list
           sudo apt update
           
           echo "Repository added successfully!"
           echo "Install kernel with: sudo apt install linux-image-kain linux-headers-kain"
-          EOF
+          SCRIPTEOF
+          
+          # Replace placeholders in setup script
+          sed -i "s|GITHUB_REPOSITORY_OWNER|${GITHUB_REPOSITORY_OWNER}|g" repo/setup.sh
+          sed -i "s|GITHUB_REPOSITORY_NAME|${GITHUB_REPOSITORY_NAME}|g" repo/setup.sh
           
           chmod +x repo/setup.sh
 
