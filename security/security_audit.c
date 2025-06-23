@@ -18,6 +18,7 @@
 #include <linux/timer.h>
 #include <linux/workqueue.h>
 #include <linux/security.h>
+#include "security_audit.h"
 
 #define AUDIT_FLOOD_THRESHOLD		1000	/* msgs per interval */
 #define AUDIT_FLOOD_INTERVAL		(HZ * 10) /* 10 seconds */
@@ -213,14 +214,18 @@ out_log:
 	/* Also log to audit subsystem if available */
 	if (audit_enabled) {
 		struct audit_buffer *ab;
+		char buf[256];
+		int len;
 
 		ab = audit_log_start(NULL, GFP_ATOMIC, AUDIT_AVC);
 		if (ab) {
 			audit_log_format(ab, "security_event=%s uid=%u msg=",
 					 event_type, uid);
 			va_start(args, fmt);
-			audit_log_vformat(ab, fmt, args);
+			len = vsnprintf(buf, sizeof(buf), fmt, args);
 			va_end(args);
+			if (len > 0)
+				audit_log_format(ab, "%s", buf);
 			audit_log_end(ab);
 		}
 	}

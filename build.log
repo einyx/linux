@@ -1,0 +1,17 @@
+make --no-print-directory -C /home/alessio/code/linux/staging \
+-f /home/alessio/code/linux/staging/Makefile 
+: "  SYNC    include/config/auto.conf.cmd"
+make -f ./Makefile syncconfig
+make -f ./scripts/Makefile.build obj=scripts/basic
+make -f ./scripts/Makefile.build obj=scripts/kconfig syncconfig
+scripts/kconfig/conf  --syncconfig Kconfig
+
+*** Error during sync of the configuration.
+
+make[3]: *** [scripts/kconfig/Makefile:85: syncconfig] Error 1
+make[2]: *** [Makefile:735: syncconfig] Error 2
+make[1]: *** [/home/alessio/code/linux/staging/Makefile:836: include/config/auto.conf.cmd] Error 2
+make[1]: *** Deleting file 'include/config/auto.conf.cmd'
+make[1]: *** [include/config/auto.conf.cmd] Deleting file 'include/generated/rustc_cfg'
+make[1]: *** [include/config/auto.conf.cmd] Deleting file 'include/generated/autoconf.h'
+make: *** [Makefile:248: __sub-make] Error 2

@@ -10,6 +10,7 @@ env:
   # Avoid permission issues with self-hosted runners
   RUNNER_TEMP: /tmp/runner-temp
   RUNNER_TOOL_CACHE: /tmp/runner-tool-cache
+  RUNNER_WORKSPACE: /tmp/runner-workspace
 
 jobs:
   build-test:
@@ -21,16 +22,20 @@ jobs:
         arch: [x86_64]  # Focus on x86_64 for now to reduce build matrix
     
     steps:
-    - name: Setup runner directories
+    - name: Pre-create runner directories
       run: |
-        sudo mkdir -p /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work/_tool
-        sudo chmod -R 777 /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work
-        sudo chown -R $USER:$USER /tmp/runner-temp /tmp/runner-tool-cache /tmp/runner-work || true
+        # Try to create directories, ignore if they fail
+        sudo mkdir -p /tmp/runner-work/_tool /tmp/runner-work/_temp /tmp/runner-work/_actions 2>/dev/null || true
+        sudo chmod -R 777 /tmp/runner-work 2>/dev/null || true
+        # Set working directory permissions
+        sudo mkdir -p ${{ github.workspace }} 2>/dev/null || true
+        sudo chmod -R 777 $(dirname ${{ github.workspace }}) 2>/dev/null || true
     
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        path: linux-source
     
     - name: Install dependencies
       run: |
@@ -43,6 +48,7 @@ jobs:
         # arm64 cross-compiler not needed for x86_64 only builds
     
     - name: Configure kernel
+      working-directory: linux-source
       run: |
         # x86_64 is the default architecture
         if [ "${{ matrix.compiler }}" = "clang" ]; then
@@ -52,6 +58,7 @@ jobs:
         make ${{ matrix.config }}
     
     - name: Build kernel
+      working-directory: linux-source
       run: |
         # x86_64 is the default architecture
         if [ "${{ matrix.compiler }}" = "clang" ]; then
@@ -66,6 +73,7 @@ jobs:
         make -j$JOBS || { echo "Build failed, retrying with verbose output..."; make V=1 -j1; }
     
     - name: Build modules
+      working-directory: linux-source
       run: |
         # x86_64 is the default architecture
         if [ "${{ matrix.compiler }}" = "clang" ]; then
