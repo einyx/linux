@@ -21,3 +21,9 @@ hardening-$(CONFIG_SECURITY_HARDENING_PROFILES) += profiles.o
 hardening-$(CONFIG_SECURITY_HARDENING_CRYPTO) += crypto.o
 hardening-$(CONFIG_SECURITY_HARDENING_STATS) += stats.o
 hardening-$(CONFIG_SECURITY_HARDENING_QUANTUM) += quantum.o
+
+# liboqs kernel wrapper
+ifdef CONFIG_SECURITY_HARDENING_QUANTUM_LIBOQS
+hardening-y += liboqs-kernel/kyber_kernel.o
+ccflags-y += -I$(src)/liboqs-kernel
+endif

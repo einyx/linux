@@ -393,6 +393,14 @@ struct hardening_quantum_ctx {
 	u8 *workspace;				/* Pre-allocated workspace */
 	u32 workspace_size;
 	
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM_LIBOQS
+	/* liboqs algorithm instances */
+	void *kyber768_kem;			/* OQS_KEM pointer */
+	void *kyber1024_kem;			/* OQS_KEM pointer */
+	void *dilithium3_sig;			/* OQS_SIG pointer */
+	void *dilithium5_sig;			/* OQS_SIG pointer */
+#endif
+	
 	/* Statistics */
 	u64 keys_generated;
 	u64 signatures_created;

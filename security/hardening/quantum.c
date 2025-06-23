@@ -25,6 +25,11 @@
 #include <linux/cred.h>
 #include "hardening.h"
 
+/* Include liboqs kernel wrapper */
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM_LIBOQS
+#include "liboqs-kernel/oqs_kernel.h"
+#endif
+
 /* Kyber parameters for different security levels */
 struct kyber_params {
 	u32 n;		/* Polynomial degree */
@@ -96,6 +101,40 @@ static const struct dilithium_params dilithium5_params = {
 	.omega = 75,
 };
 
+/* Initialize liboqs if enabled */
+static int hardening_quantum_init_liboqs(struct hardening_quantum_ctx *ctx)
+{
+#ifdef CONFIG_SECURITY_HARDENING_QUANTUM_LIBOQS
+	OQS_KEM *kem;
+	
+	/* Initialize liboqs */
+	OQS_init();
+	
+	/* Initialize Kyber768 */
+	kem = OQS_KEM_new(OQS_KEM_alg_kyber_768);
+	if (!kem) {
+		pr_err("Failed to initialize Kyber768\n");
+		return -ENOMEM;
+	}
+	
+	ctx->kyber768_kem = kem;
+	pr_info("liboqs Kyber768 initialized: pk=%zu sk=%zu ct=%zu ss=%zu\n",
+		kem->length_public_key, kem->length_secret_key,
+		kem->length_ciphertext, kem->length_shared_secret);
+	
+	/* Initialize Kyber1024 */
+	kem = OQS_KEM_new(OQS_KEM_alg_kyber_1024);
+	if (kem) {
+		ctx->kyber1024_kem = kem;
+		pr_info("liboqs Kyber1024 initialized\n");
+	}
+	
+	return 0;
+#else
+	return 0;
+#endif
+}
+
 /* Allocate quantum context */
 struct hardening_quantum_ctx *hardening_alloc_quantum_ctx(void)
 {
@@ -131,6 +170,15 @@ struct hardening_quantum_ctx *hardening_alloc_quantum_ctx(void)
 	quantum->workspace_size = 65536;  /* 64KB workspace */
 	quantum->workspace = kvmalloc(quantum->workspace_size, GFP_KERNEL);
 	if (!quantum->workspace) {
+		crypto_free_shash(quantum->hash_tfm);
+		kfree(quantum);
+		return NULL;
+	}
+
+	/* Initialize liboqs if configured */
+	if (hardening_quantum_init_liboqs(quantum) < 0) {
+		pr_err("hardening: failed to initialize liboqs\n");
+		kvfree(quantum->workspace);
 		crypto_free_shash(quantum->hash_tfm);
 		kfree(quantum);
 		return NULL;
@@ -283,10 +331,8 @@ int hardening_quantum_generate_keypair(struct hardening_quantum_ctx *quantum,
 	/* Generate post-quantum component based on algorithm */
 	switch (algo) {
 	case HARDENING_PQ_KYBER768:
-		ret = kyber_keygen(key, &kyber768_params);
-		break;
 	case HARDENING_PQ_KYBER1024:
-		ret = kyber_keygen(key, &kyber1024_params);
+		ret = kyber_keygen_liboqs(quantum, key, algo);
 		break;
 	case HARDENING_PQ_DILITHIUM3:
 		ret = dilithium_keygen(key, &dilithium3_params);

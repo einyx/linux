@@ -160,4 +160,16 @@ config SECURITY_HARDENING_QUANTUM
 	  Warning: This feature has performance overhead and should
 	  only be enabled for high-security government deployments.
 
+config SECURITY_HARDENING_QUANTUM_LIBOQS
+	bool "Use liboqs for quantum algorithms"
+	depends on SECURITY_HARDENING_QUANTUM
+	default n
+	help
+	  Enable integration with Open Quantum Safe (liboqs) library
+	  for real implementations of post-quantum algorithms.
+	  This provides actual cryptographic security rather than
+	  placeholder implementations.
+
+	  If unsure, say N.
+
 endif # SECURITY_HARDENING
