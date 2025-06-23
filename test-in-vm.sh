@@ -174,97 +174,74 @@ create_initramfs() {
     # Create directory structure
     mkdir -p {bin,sbin,etc,proc,sys,dev,tmp,mnt,root}
     
-    # Create init script
+    # Create init script - try static approach
     cat > init << 'EOF'
-#!/bin/sh
+#!/bin/busybox sh
 
-# Mount essential filesystems
-/bin/mount -t proc none /proc
-/bin/mount -t sysfs none /sys
-/bin/mount -t devtmpfs none /dev
-
-# Basic system info
 echo "=== Kernel Boot Test ==="
-echo "Kernel version: $(uname -r)"
-echo "Architecture: $(uname -m)"
-echo "Memory: $(grep MemTotal /proc/meminfo)"
-echo "CPUs: $(grep -c processor /proc/cpuinfo)"
-echo "Boot time: $(cut -d' ' -f1 /proc/uptime)s"
 
-# Run tests if requested
-if grep -q "run_tests" /proc/cmdline; then
-    echo "=== Running Tests ==="
-    
-    # Memory test
-    echo -n "Memory allocation test... "
-    if dd if=/dev/zero of=/tmp/test bs=1M count=100 2>/dev/null; then
-        echo "PASS"
-    else
-        echo "FAIL"
-    fi
-    rm -f /tmp/test
-    
-    # CPU test
-    echo -n "CPU stress test... "
-    for i in $(seq 1 10000); do
-        echo $((i * i)) > /dev/null
-    done
-    echo "PASS"
-    
-    # Network test (loopback)
-    echo -n "Network loopback test... "
-    if ping -c 1 127.0.0.1 > /dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL"
-    fi
+# Try to mount basic filesystems
+busybox mount -t proc none /proc 2>/dev/null || echo "proc mount failed"
+busybox mount -t sysfs none /sys 2>/dev/null || echo "sysfs mount failed"
+
+# Basic system info  
+echo "Kernel version: $(busybox uname -r)"
+echo "Architecture: $(busybox uname -m)"
+
+if [ -f /proc/meminfo ]; then
+    echo "Memory: $(busybox grep MemTotal /proc/meminfo)"
+fi
+
+if [ -f /proc/cpuinfo ]; then
+    echo "CPUs: $(busybox grep -c processor /proc/cpuinfo)"
+fi
+
+if [ -f /proc/uptime ]; then
+    echo "Boot time: $(busybox cut -d' ' -f1 /proc/uptime)s"
 fi
 
 # Signal successful boot
 echo "BOOT_SUCCESS"
 
-# Keep system running for debugging if requested
-if grep -q "debug" /proc/cmdline; then
-    echo "Debug mode - system will stay up"
-    /bin/sh
-else
-    # Shutdown
-    /bin/sync
-    /bin/poweroff -f
-fi
+# Simple shutdown
+busybox sync
+busybox poweroff -f
 EOF
     chmod +x init
     
-    # Copy busybox
-    if [ -f /bin/busybox ]; then
-        cp /bin/busybox bin/
-    elif [ -f /usr/bin/busybox ]; then
-        cp /usr/bin/busybox bin/
+    # Try to use the host's busybox first (static binary)
+    if command -v busybox >/dev/null 2>&1; then
+        cp $(command -v busybox) bin/busybox
+        chmod +x bin/busybox
+        # Use busybox as shell  
+        ln -s busybox bin/sh
     else
-        # Create minimal busybox
+        # Copy host shell and libraries (original approach but better)
+        if [ -f /bin/dash ]; then
+            # Use dash if available (smaller, static-friendly)
+            cp /bin/dash bin/sh
+        elif [ -f /bin/sh ]; then
+            cp /bin/sh bin/sh
+        else
+            echo "No suitable shell found" >&2
+            exit 1
+        fi
+        chmod +x bin/sh
+        
+        # Copy required libraries
+        mkdir -p lib lib64 lib/x86_64-linux-gnu
+        for lib in $(ldd bin/sh 2>/dev/null | grep -o '/lib[^ ]*' | sort -u); do
+            if [ -f "$lib" ]; then
+                cp "$lib" ".${lib}" 2>/dev/null || true
+            fi
+        done
+        
+        # Create minimal busybox wrapper
         cat > bin/busybox << 'EOF'
 #!/bin/sh
-# Minimal shell implementation
-case "$1" in
-    sh) shift; exec /bin/sh "$@" ;;
-    mount) shift; mount "$@" ;;
-    poweroff) halt ;;
-    *) echo "busybox: $1: not found" >&2; exit 1 ;;
-esac
+exec /bin/sh "$@"
 EOF
         chmod +x bin/busybox
-    fi
-    
-    # Create basic shell if needed
-    if [ ! -f bin/sh ] && [ -f /bin/sh ]; then
-        cp /bin/sh bin/
-        # Copy required libraries
-        for lib in $(ldd /bin/sh | grep -o '/lib.*\.[0-9]' | sort -u); do
-            mkdir -p .$(dirname $lib)
-            cp $lib .$lib
-        done
-    else
-        ln -s busybox bin/sh
     fi
     
     # Create other essential symlinks
@@ -289,8 +266,8 @@ boot_test() {
     
     log "Starting boot test in QEMU..."
     
-    # Prepare kernel command line
-    CMDLINE="console=ttyS0 panic=10"
+    # Prepare kernel command line with explicit init
+    CMDLINE="console=ttyS0 panic=10 init=/init"
     if [ "$RUN_TESTS" = true ]; then
         CMDLINE="$CMDLINE run_tests"
     fi

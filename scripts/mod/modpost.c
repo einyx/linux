@@ -20,6 +20,10 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#define min(a, b) ((a) < (b) ? (a) : (b))
 
 #include <hash.h>
 #include <hashtable.h>
@@ -57,6 +61,7 @@ static bool allow_missing_ns_imports;
 static bool error_occurred;
 
 static bool extra_warn;
+static int num_jobs = 1;
 
 bool target_is_big_endian;
 bool host_is_big_endian;
@@ -2243,6 +2248,65 @@ static void check_host_endian(void)
 	}
 }
 
+static void process_modules_parallel(void)
+{
+	struct module **mod_array;
+	int total_modules = 0;
+	int modules_per_job;
+	int i, j;
+	pid_t *pids;
+	struct module *mod;
+
+	/* Count non-vmlinux modules */
+	list_for_each_entry(mod, &modules, list) {
+		if (!mod->dump_file && !mod->is_vmlinux)
+			total_modules++;
+	}
+
+	if (total_modules == 0 || num_jobs == 1)
+		return;
+
+	/* Convert list to array for easier parallel processing */
+	mod_array = xmalloc(total_modules * sizeof(struct module *));
+	i = 0;
+	list_for_each_entry(mod, &modules, list) {
+		if (!mod->dump_file && !mod->is_vmlinux)
+			mod_array[i++] = mod;
+	}
+
+	modules_per_job = (total_modules + num_jobs - 1) / num_jobs;
+	pids = xmalloc(num_jobs * sizeof(pid_t));
+
+	for (i = 0; i < num_jobs && i * modules_per_job < total_modules; i++) {
+		pids[i] = fork();
+		if (pids[i] == 0) {
+			/* Child process */
+			int start = i * modules_per_job;
+			int end = min(start + modules_per_job, total_modules);
+			
+			for (j = start; j < end; j++) {
+				write_mod_c_file(mod_array[j]);
+			}
+			exit(0);
+		} else if (pids[i] < 0) {
+			/* Fork failed, fall back to sequential */
+			num_jobs = i;
+			break;
+		}
+	}
+
+	/* Wait for all child processes */
+	for (j = 0; j < i; j++) {
+		int status;
+		waitpid(pids[j], &status, 0);
+		if (WEXITSTATUS(status) != 0)
+			error_occurred = true;
+	}
+
+	free(pids);
+	free(mod_array);
+}
+
 int main(int argc, char **argv)
 {
 	struct module *mod;
@@ -2253,7 +2317,7 @@ int main(int argc, char **argv)
 	LIST_HEAD(dump_lists);
 	struct dump_list *dl, *dl2;
 
-	while ((opt = getopt(argc, argv, "ei:MmnT:to:au:WwENd:xb")) != -1) {
+	while ((opt = getopt(argc, argv, "ei:MmnT:to:au:WwENd:xbj:")) != -1) {
 		switch (opt) {
 		case 'e':
 			external_module = true;
@@ -2308,6 +2372,11 @@ int main(int argc, char **argv)
 		case 'x':
 			extended_modversions = true;
 			break;
+		case 'j':
+			num_jobs = atoi(optarg);
+			if (num_jobs <= 0)
+				num_jobs = 1;
+			break;
 		default:
 			exit(1);
 		}
@@ -2340,14 +2409,24 @@ int main(int argc, char **argv)
 	if (unused_exports_white_list)
 		handle_white_list_exports(unused_exports_white_list);
 
+	/* Process vmlinux first (must be sequential) */
 	list_for_each_entry(mod, &modules, list) {
 		if (mod->dump_file)
 			continue;
 
 		if (mod->is_vmlinux)
 			write_vmlinux_export_c_file(mod);
-		else
+	}
+
+	/* Process regular modules in parallel if num_jobs > 1 */
+	if (num_jobs > 1) {
+		process_modules_parallel();
+	} else {
+		list_for_each_entry(mod, &modules, list) {
+			if (mod->dump_file || mod->is_vmlinux)
+				continue;
 			write_mod_c_file(mod);
+		}
 	}
 
 	if (missing_namespace_deps)

@@ -140,7 +140,7 @@ quiet_cmd_modpost = MODPOST $@
 		echo >&2 "         You may get many unresolved symbol errors."; \
 		echo >&2 "         You can set KBUILD_MODPOST_WARN=1 to turn errors into warning"; \
 		echo >&2 "         if you want to proceed at your own risk.";) \
-	$(MODPOST) $(modpost-args)
+	$(MODPOST) $(modpost-args) -j $(shell nproc)
 
 targets += $(output-symdump)
 $(output-symdump): $(modpost-deps) FORCE
