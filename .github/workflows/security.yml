@@ -32,8 +32,16 @@ jobs:
     - name: Install analysis tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y cppcheck sparse coccinelle smatch
+        sudo apt-get install -y cppcheck sparse coccinelle
         sudo apt-get install -y clang clang-tools python3-pip
+        # Dependencies for building smatch
+        sudo apt-get install -y gcc make libsqlite3-dev libxml2-dev libgtk-3-dev
+        # Install smatch from source since it's not in Ubuntu repos
+        git clone https://github.com/error27/smatch.git /tmp/smatch
+        cd /tmp/smatch
+        make
+        sudo make install
+        cd -
         pip3 install --user semgrep
     
     - name: Run Coccinelle semantic patches
